@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import streamlit as st
 
@@ -32,40 +33,36 @@ if "combined_df" not in st.session_state:
   st.session_state["combined_df"] = None
 
 
-# دالة تحميل البيانات بأمان للمحفظة
+# دالة تحميل البيانات بأمان للمحفظة مع إنشاء الملف إذا لم يكن موجوداً
 def load_data():
-  try:
-    df = pd.read_csv(DATA_FILE)
-    expected_columns = [
-        "التاريخ",
-        "نوع العملية",
-        "المبلغ",
-        "التفاصيل / الجهة / السبب",
-        "طريقة الدفع",
-        "حالة الديون",
-        "الباقي في المحفظة",
-    ]
-    for col in expected_columns:
-      if col not in df.columns:
-        if col == "طريقة الدفع":
-          df[col] = "كاش"
-        elif col == "حالة الديون":
-          df[col] = "لا توجد"
-        else:
-          df[col] = []
-    return df
-  except Exception:
-    return pd.DataFrame(
-        columns=[
-            "التاريخ",
-            "نوع العملية",
-            "المبلغ",
-            "التفاصيل / الجهة / السبب",
-            "طريقة الدفع",
-            "حالة الديون",
-            "الباقي في المحفظة",
-        ]
-    )
+  expected_columns = [
+      "التاريخ",
+      "نوع العملية",
+      "المبلغ",
+      "التفاصيل / الجهة / السبب",
+      "طريقة الدفع",
+      "حالة الديون",
+      "الباقي في المحفظة",
+  ]
+  if os.path.exists(DATA_FILE):
+    try:
+      df = pd.read_csv(DATA_FILE)
+      for col in expected_columns:
+        if col not in df.columns:
+          if col == "طريقة الدفع":
+            df[col] = "كاش"
+          elif col == "حالة الديون":
+            df[col] = "لا توجد"
+          else:
+            df[col] = 0.0 if col == "المبلغ" or col == "الباقي في المحفظة" else ""
+      return df
+    except Exception:
+      pass
+
+  # إنشاء ملف فارغ إذا لم يكن موجوداً أو حدث خطأ
+  empty_df = pd.DataFrame(columns=expected_columns)
+  empty_df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+  return empty_df
 
 
 # ====================================================
@@ -83,11 +80,17 @@ with app_mode[0]:
       else 0.0
   )
 
+  current_bal_val = (
+      float(df["الباقي في المحفظة"].iloc[-1])
+      if (not df.empty and "الباقي في المحفظة" in df.columns and len(df) > 0)
+      else 0.0
+  )
+
   col1, col2, col3 = st.columns(3)
   with col1:
     st.metric(
         label="الرصيد (الفعلي) الحالي في المحفظة",
-        value=f"{df['الباقي في المحفظة'].iloc[-1] if not df.empty else 0:,.2f} د.ع",
+        value=f"{current_bal_val:,.2f} د.ع",
     )
   with col2:
     st.metric(
@@ -117,9 +120,14 @@ with app_mode[0]:
       submit_deposit = st.form_submit_button("حفظ الإيداع")
       if submit_deposit:
         if deposit_amount is not None and deposit_amount > 0:
+          df_current = load_data()
           current_bal = (
-              df["الباقي في المحفظة"].iloc[-1]
-              if (not df.empty and "الباقي في المحفظة" in df.columns)
+              float(df_current["الباقي في المحفظة"].iloc[-1])
+              if (
+                  not df_current.empty
+                  and "الباقي في المحفظة" in df_current.columns
+                  and len(df_current) > 0
+              )
               else 0.0
           )
           new_bal = current_bal + deposit_amount
@@ -132,8 +140,8 @@ with app_mode[0]:
               "حالة الديون": ["لا توجد"],
               "الباقي في المحفظة": [new_bal],
           })
-          df = pd.concat([df, new_row], ignore_index=True)
-          df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+          df_current = pd.concat([df_current, new_row], ignore_index=True)
+          df_current.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
           st.success("تم حفظ الإيداع وتحديث الرصيد بنجاح!")
           st.rerun()
         else:
@@ -159,9 +167,14 @@ with app_mode[0]:
       submit_withdraw = st.form_submit_button("حفظ السحب")
       if submit_withdraw:
         if withdraw_amount is not None and withdraw_amount > 0:
+          df_current = load_data()
           current_bal = (
-              df["الباقي في المحفظة"].iloc[-1]
-              if (not df.empty and "الباقي في المحفظة" in df.columns)
+              float(df_current["الباقي في المحفظة"].iloc[-1])
+              if (
+                  not df_current.empty
+                  and "الباقي في المحفظة" in df_current.columns
+                  and len(df_current) > 0
+              )
               else 0.0
           )
           new_bal = current_bal - withdraw_amount
@@ -179,8 +192,8 @@ with app_mode[0]:
               "حالة الديون": [debt_status],
               "الباقي في المحفظة": [new_bal],
           })
-          df = pd.concat([df, new_row], ignore_index=True)
-          df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+          df_current = pd.concat([df_current, new_row], ignore_index=True)
+          df_current.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
           st.success("تم حفظ السحب وتحديث الرصيد بنجاح!")
           st.rerun()
         else:
@@ -201,9 +214,14 @@ with app_mode[0]:
       submit_return = st.form_submit_button("إلغاء واسترجاع للمحفظة")
       if submit_return:
         if return_amount is not None and return_amount > 0:
+          df_current = load_data()
           current_bal = (
-              df["الباقي في المحفظة"].iloc[-1]
-              if (not df.empty and "الباقي في المحفظة" in df.columns)
+              float(df_current["الباقي في المحفظة"].iloc[-1])
+              if (
+                  not df_current.empty
+                  and "الباقي في المحفظة" in df_current.columns
+                  and len(df_current) > 0
+              )
               else 0.0
           )
           new_bal = current_bal + return_amount
@@ -216,8 +234,8 @@ with app_mode[0]:
               "حالة الديون": ["لا توجد"],
               "الباقي في المحفظة": [new_bal],
           })
-          df = pd.concat([df, new_row], ignore_index=True)
-          df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+          df_current = pd.concat([df_current, new_row], ignore_index=True)
+          df_current.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
           st.success("تم استرجاع المبلغ وإضافته للمحفظة بنجاح!")
           st.rerun()
         else:
@@ -225,17 +243,17 @@ with app_mode[0]:
 
   st.markdown("---")
   st.subheader("📋 السجل التفصيلي للعمليات")
+  df = load_data()
   if not df.empty:
     st.dataframe(df, use_container_width=True)
 
-    # ميزة تعديل أو حذف عملية سابقة
     with st.expander("✏️ تعديل أو حذف عملية سابقة من السجل"):
       row_indices = df.index.tolist()
       selected_row_idx = st.selectbox(
           "اختر رقم السجل (Index) للتعديل أو الحذف:", row_indices
       )
 
-      if selected_row_idx is not None:
+      if selected_row_idx is not None and selected_row_idx in df.index:
         current_row = df.loc[selected_row_idx]
 
         with st.form("edit_row_form"):
@@ -303,12 +321,22 @@ with app_mode[0]:
   st.markdown("---")
   st.subheader("📊 جرد الحسابات والإحصائيات الشاملة")
   if not df.empty:
-    total_withdrawn = df[df["نوع العملية"] == "سحب كاش"]["المبلغ"].sum()
-    total_deposited_sum = df[df["نوع العملية"] == "إيداع للمحفظة"][
-        "المبلغ"
-    ].sum()
-    total_returned = df[df["نوع العملية"] == "استرجاع للمحفظة"]["المبلغ"].sum()
-    current_remaining = df["الباقي في المحفظة"].iloc[-1]
+    total_withdrawn = (
+        df[df["نوع العملية"] == "سحب كاش"]["المبلغ"].sum()
+        if "نوع العملية" in df.columns
+        else 0.0
+    )
+    total_deposited_sum = (
+        df[df["نوع العملية"] == "إيداع للمحفظة"]["المبلغ"].sum()
+        if "نوع العملية" in df.columns
+        else 0.0
+    )
+    total_returned = (
+        df[df["نوع العملية"] == "استرجاع للمحفظة"]["المبلغ"].sum()
+        if "نوع العملية" in df.columns
+        else 0.0
+    )
+    current_remaining = current_bal_val
 
     col_s1, col_s2, col_s3, col_s4 = st.columns(4)
     with col_s1:
@@ -340,10 +368,11 @@ with app_mode[0]:
 
       if st.button("✅ تم التسديد (تحديث وإزالة من المديونية)"):
         real_idx = int(
-            selected_debt.split("رقم السجل (")[1].split(")")[0]
+            selected_debt.split("رقم السجل (").split(")")[0]
         )
-        df.loc[real_idx, "حالة الديون"] = "تم التسديد"
-        df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+        df_current = load_data()
+        df_current.loc[real_idx, "حالة الديون"] = "تم التسديد"
+        df_current.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
         st.success("تم تسديد المديونية وتحديث حالتها بنجاح!")
         st.rerun()
     else:
@@ -352,11 +381,11 @@ with app_mode[0]:
 # ====================================================
 # القسم الثاني: الجرد الكلي ومقارنة الشهور
 # ====================================================
-with app_mode[1]:
+with app_mode:
   st.markdown("### 📊 الجرد الكلي ومقارنة أداء المكاتب بين شهرين")
   st.write(
       "قم برفع ملف الشهر الأول والملف الثاني المقارن أدناه. ستبقى النتائج"
-      " محفوظة بالكامل."
+      " محفوظة بالكامل أثناء الجلسة."
   )
 
   col_u1, col_u2 = st.columns(2)
@@ -419,7 +448,7 @@ with app_mode[1]:
       reason_col = (
           "Reason Type"
           if "Reason Type" in combined_df.columns
-          else combined_df.columns[2]
+          else combined_df.columns
       )
       combined_df["Arabic Translation"] = combined_df[reason_col].apply(
           lambda x: translation_dict.get(x, x)
@@ -465,7 +494,7 @@ with app_mode[1]:
 # ====================================================
 # القسم الثالث: نسب الأداء والنقاط
 # ====================================================
-with app_mode[2]:
+with app_mode:
   st.markdown("### ⭐ نسب الأداء وتقييم النقاط للمكاتب")
   st.write(
       "هذا القسم يعتمد مباشرة على بيانات الجرد الكلي ومقارنة الشهور للمكاتب"
