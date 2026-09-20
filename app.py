@@ -15,16 +15,16 @@ st.markdown(
 )
 
 # استخدام الـ Tabs العلوية للتنقل السلس والسريع
-app_mode = st.tabs([
+tab1, tab2, tab3 = st.tabs([
     "💳 محفظة ASIA PAY",
     "📊 الجرد الكلي ومقارنة الشهور",
-    "⭐ نسب الأداء نسب الإنجاز والنقاط",
+    "⭐ نسب الأداء ونسب الإنجاز والنقاط",
 ])
 
 # تحديد اسم ملف البيانات المحلي للمحفظة
 DATA_FILE = "wallet_data_v4.csv"
 
-# --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة (مهم جداً لعدم الضياع) ---
+# --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
 if "pivot_result" not in st.session_state:
   st.session_state["pivot_result"] = None
 if "combined_df" not in st.session_state:
@@ -75,7 +75,7 @@ def load_data():
 # ====================================================
 # القسم الأول: محفظة ASIA PAY
 # ====================================================
-with app_mode[0]:
+with tab1:
   st.markdown("### 💼 محفظة ASIA PAY")
   st.markdown("---")
 
@@ -242,7 +242,7 @@ with app_mode[0]:
           "اختر رقم السجل (Index) للتعديل أو الحذف:", row_indices
       )
 
-      if selected_row_idx is not None:
+      if selected_row_idx is not None and selected_row_idx in df.index:
         current_row = df.loc[selected_row_idx]
         with st.form("edit_row_form"):
           st.write(
@@ -272,7 +272,7 @@ with app_mode[0]:
                 new_edit_reason
             )
             running_bal = 0.0
-            for i in range(len(df)):
+            for i in df.index:
               op_type = df.loc[i, "نوع العملية"]
               op_amt = float(df.loc[i, "المبلغ"])
               if op_type in ["إيداع للمحفظة", "استرجاع للمحفظة"]:
@@ -287,7 +287,7 @@ with app_mode[0]:
           if submit_delete:
             df = df.drop(selected_row_idx).reset_index(drop=True)
             running_bal = 0.0
-            for i in range(len(df)):
+            for i in df.index:
               op_type = df.loc[i, "نوع العملية"]
               op_amt = float(df.loc[i, "المبلغ"])
               if op_type in ["إيداع للمحفظة", "استرجاع للمحفظة"]:
@@ -321,7 +321,7 @@ with app_mode[0]:
     )
     current_remaining = (
         df["الباقي في المحفظة"].iloc[-1]
-        if "الباقي في المحفظة" in df.columns
+        if "الباقي في المحفظة" in df.columns and not df.empty
         else 0.0
     )
 
@@ -341,15 +341,18 @@ with app_mode[0]:
     debts_df = df[df["حالة الديون"] == "غير مسدد (مديونية)"]
     if not debts_df.empty:
       st.warning(f"تنبيه: لديك {len(debts_df)} مديونيات غير مسددة حالياً.")
-      debt_options = []
+      debt_options = {}
+      debt_list = []
       for idx, row in debts_df.iterrows():
-        debt_options.append(
-            f"رقم السجل ({idx}) - الجهة/الشخص: {row['التفاصيل / الجهة / السبب']}"
-            f" - المبلغ: {row['المبلغ']} د.ع"
-        )
-      selected_debt = st.selectbox("اختر المديونية لتسديدها:", debt_options)
+        label_text = f"رقم السجل ({idx}) - الجهة/الشخص: {row['التفاصيل / الجهة / السبب']} - المبلغ: {row['المبلغ']} د.ع"
+        debt_options[label_text] = idx
+        debt_list.append(label_text)
+
+      selected_debt_label = st.selectbox(
+          "اختر المديونية لتسديدها:", debt_list
+      )
       if st.button("✅ تم التسديد (تحديث وإزالة من المديونية)"):
-        real_idx = int(selected_debt.split("رقم السجل (").split(")")[0])
+        real_idx = debt_options[selected_debt_label]
         df.loc[real_idx, "حالة الديون"] = "تم التسديد"
         df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
         st.success("تم تسديد المديونية وتحديث حالتها بنجاح!")
@@ -360,7 +363,7 @@ with app_mode[0]:
 # ====================================================
 # القسم الثاني: الجرد الكلي ومقارنة الشهور
 # ====================================================
-with app_mode:
+with tab2:
   st.markdown("### 📊 الجرد الكلي ومقارنة أداء المكاتب بين شهرين")
   st.write(
       "قم برفع ملف الشهر الأول والملف الثاني المقارن أدناه. ستبقى النتائج"
@@ -387,20 +390,13 @@ with app_mode:
 
       combined_df = pd.concat([df8, df9], ignore_index=True)
 
-      # البحث عن عمود المبلغ بمرونة
+      amt_candidates = [
+          c
+          for c in combined_df.columns
+          if "amount" in str(c).lower() or "مبلغ" in str(c)
+      ]
       amt_col = (
-          "Amount"
-          if "Amount" in combined_df.columns
-          else [
-              c
-              for c in combined_df.columns
-              if "amount" in c.lower() or "مبلغ" in c
-          ]
-      )
-      amt_col = (
-          amt_col[0]
-          if isinstance(amt_col, list) and amt_col
-          else combined_df.columns
+          amt_candidates[0] if amt_candidates else combined_df.columns[0]
       )
 
       def clean_amount(val):
@@ -442,6 +438,8 @@ with app_mode:
           "Reason Type"
           if "Reason Type" in combined_df.columns
           else combined_df.columns
+          if len(combined_df.columns) > 2
+          else combined_df.columns[0]
       )
       combined_df["Arabic Translation"] = combined_df[reason_col].apply(
           lambda x: translation_dict.get(str(x), str(x))
@@ -455,7 +453,11 @@ with app_mode:
       name_col = (
           "Arabic Name"
           if "Arabic Name" in combined_df.columns
-          else combined_df.columns
+          else (
+              combined_df.columns
+              if len(combined_df.columns) > 1
+              else combined_df.columns[0]
+          )
       )
 
       pivot_result = combined_df.pivot_table(
@@ -498,7 +500,7 @@ with app_mode:
 # ====================================================
 # القسم الثالث: نسب الأداء ونسب الإنجاز والنقاط
 # ====================================================
-with app_mode:
+with tab3:
   st.markdown("### ⭐ نسب الأداء، نسب الإنجاز وتقييم النقاط للمكاتب")
   st.write(
       "هذا القسم يعتمد مباشرة على بيانات الجرد ومقارنة الشهور لعمود الكود"
@@ -519,7 +521,11 @@ with app_mode:
     name_col = (
         "Arabic Name"
         if "Arabic Name" in df_combined.columns
-        else df_combined.columns
+        else (
+            df_combined.columns
+            if len(df_combined.columns) > 1
+            else df_combined.columns[0]
+        )
     )
 
     if code_col in df_combined.columns and name_col in df_combined.columns:
@@ -532,7 +538,6 @@ with app_mode:
           .reset_index()
       )
 
-      # حساب نسبة الإنجاز بناءً على المجموع مقارنة بمستهدف افتراضي (مثلاً 10,000,000 د.ع كهدف أعلى للمكتب)
       target_benchmark = 10000000.0
 
       def calc_performance_and_progress(row):
@@ -566,7 +571,6 @@ with app_mode:
       )
       st.dataframe(perf_summary, use_container_width=True)
 
-      # رسم بياني لنسب الإنجاز للمكاتب
       st.markdown("### 📈 مقارنة نسب الإنجاز للمكاتب")
       chart_df = perf_summary.set_index(name_col)["نسبة الإنجاز (%)"]
       st.bar_chart(chart_df)
