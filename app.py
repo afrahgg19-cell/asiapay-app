@@ -913,26 +913,6 @@ with tab_kpi:
               columns=["G_clean", "F_clean", "B_clean", "T_num"]
           )
 
-        row_item = {
-            "Short Code (G)": g_v,
-            "Arabic Name (F)": f_v,
-        }
-
-        if g_v in opt_data_map:
-          row_item.update(opt_data_map[g_v])
-
-        w_bal = wallet_balance_map.get(str(g_v).strip(), 0.0)
-        row_item["رصيد المحفظة"] = (
-            f"{w_bal:,.2f}" if isinstance(w_bal, (int, float)) else w_bal
-        )
-
-        for op in target_ops:
-          if not grp.empty:
-            count_val = grp["B_clean"].str.lower() == op.lower()
-            row_item[f"عدد ({op})"] = int(count_val.sum())
-          else:
-            row_item[f"عدد ({op})"] = 0
-
         if not grp.empty:
           b2b_mask = (
               grp["B_clean"].str.lower() == "business to business transfer"
@@ -948,24 +928,66 @@ with tab_kpi:
             if total_b2b_sum == int(total_b2b_sum)
             else f"{total_b2b_sum:,.2f}"
         )
-        row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
-        row_item["حركه ال100 الف"] = (
-            "Done" if total_b2b_sum > 99000 else ""
+        row_item = {
+            "Short Code": g_v,
+            "Organiztione Arabic name": f_v,
+            "address": opt_data_map.get(g_v, {}).get(
+                "address", opt_data_map.get(g_v, {}).get("العنوان", "")
+            ),
+            "msisdn": opt_data_map.get(g_v, {}).get(
+                "msisdn", opt_data_map.get(g_v, {}).get("رقم الهاتف", "")
+            ),
+            "Busines to Business transfer": formatted_b2b,
+            "حركه 100 الف": "Done" if total_b2b_sum > 99000 else "",
+            "حركه 3 مليون": "Done" if total_b2b_sum > 2999000 else "",
+            "اربع حركات": "Done" if high_t_count >= 4 else "",
+        }
+
+        # دمج أي أعمدة إضافية أخرى من الإكسل الاختياري إن وجدت
+        for c_k, c_v in opt_data_map.get(g_v, {}).items():
+          if c_k not in row_item:
+            row_item[c_k] = c_v
+
+        # إضافة رصيد المحفظة وعمليات الـ KPI كبقية السوالف
+        w_bal = wallet_balance_map.get(str(g_v).strip(), 0.0)
+        row_item["رصيد المحفظة"] = (
+            f"{w_bal:,.2f}" if isinstance(w_bal, (int, float)) else w_bal
         )
-        row_item["حركه ال3 مليون"] = (
-            "Done" if total_b2b_sum > 2999000 else ""
-        )
-        row_item["عدد الحركات > 4999 (4+)"] = (
-            "Done" if high_t_count >= 4 else ""
-        )
+
+        for op in target_ops:
+          if not grp.empty:
+            count_val = grp["B_clean"].str.lower() == op.lower()
+            row_item[f"عدد ({op})"] = int(count_val.sum())
+          else:
+            row_item[f"عدد ({op})"] = 0
 
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
+
+      # ترتيب صارم ومحدد حسب طلبك تماماً مع بقية الأعمدة بعدها
+      explicit_order = [
+          "Short Code",
+          "Organiztione Arabic name",
+          "address",
+          "msisdn",
+          "Busines to Business transfer",
+          "حركه 100 الف",
+          "حركه 3 مليون",
+          "اربع حركات",
+      ]
+      existing_cols = [
+          c for c in explicit_order if c in final_kpi_table.columns
+      ]
+      remaining_cols = [
+          c for c in final_kpi_table.columns if c not in existing_cols
+      ]
+      final_kpi_table = final_kpi_table[existing_cols + remaining_cols]
+
       st.subheader(
           "📋 نتيجة تقرير الـ KPI (دمج شامل للحركات + الإكسل الاختياري +"
-          " المحفظة)"
+          " المحفظة بالترتيب المطلوب)"
       )
       st.dataframe(final_kpi_table, use_container_width=True)
 
