@@ -629,40 +629,37 @@ with tab_kpi:
       kpi_df = pd.read_excel(kpi_uploaded_file)
       cols_list = kpi_df.columns.tolist()
 
-      # تحديد الأعمدة بدقة حسب H (index 7 أو عمود H), F (index 5 أو Arabic Name/F), C (index 2 أو العمود الثالث), T (index 19)
-      h_c = (
-          "H"
+      # تحديد المواقع بدقة (A=0, B=1, C=2, F=5, H=7, T=19)
+      h_idx = 7 if len(cols_list) > 7 else 0
+      f_idx = 5 if len(cols_list) > 5 else 0
+      c_idx = 2 if len(cols_list) > 2 else 0
+      t_idx = 19 if len(cols_list) > 19 else (len(cols_list) - 1)
+
+      work_kpi = pd.DataFrame()
+      work_kpi["H_clean"] = (
+          kpi_df["H"].astype(str).str.strip()
           if "H" in kpi_df.columns
-          else (cols_list[7] if len(cols_list) > 7 else cols_list[0])
+          else kpi_df.iloc[:, h_idx].astype(str).str.strip()
       )
-      f_c = (
-          "Arabic Name"
+      work_kpi["F_clean"] = (
+          kpi_df["Arabic Name"].astype(str).str.strip()
           if "Arabic Name" in kpi_df.columns
           else (
-              "F"
+              kpi_df["F"].astype(str).str.strip()
               if "F" in kpi_df.columns
-              else (cols_list[5] if len(cols_list) > 5 else cols_list[0])
+              else kpi_df.iloc[:, f_idx].astype(str).str.strip()
           )
       )
-      # قراءة عمليات عمود C (index 2 أو العمود المسمى C)
-      c_col = (
-          "C"
+      work_kpi["C_clean"] = (
+          kpi_df["C"].astype(str).str.strip()
           if "C" in kpi_df.columns
-          else (cols_list if len(cols_list) > 2 else cols_list[0])
+          else kpi_df.iloc[:, c_idx].astype(str).str.strip()
       )
-      t_c = (
-          cols_list[19]
-          if len(cols_list) > 19
-          else next(
-              (c for c in cols_list if str(c).upper() == "T"), cols_list[-1]
-          )
+      work_kpi["T_text"] = (
+          kpi_df["T"].astype(str).str.strip()
+          if "T" in kpi_df.columns
+          else kpi_df.iloc[:, t_idx].astype(str).str.strip()
       )
-
-      work_kpi = kpi_df.copy()
-      work_kpi["H_clean"] = work_kpi[h_c].astype(str).str.strip()
-      work_kpi["F_clean"] = work_kpi[f_c].astype(str).str.strip()
-      work_kpi["C_clean"] = work_kpi[c_col].astype(str).str.strip()
-      work_kpi["T_text"] = work_kpi[t_c].astype(str).str.strip()
 
       kpi_rows_list = []
       for (h_v, f_v), grp in work_kpi.groupby(
