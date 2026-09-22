@@ -636,41 +636,60 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (محدث بحل مطابقة عمود R والكود)
+# التبويب الرابع: KPI (الملف نفسه يحتوي على ورقتين: الحركات والمحفظة)
 # ====================================================
 with tab_kpi:
-  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة المفلتر")
+  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة من الورقة الثانية")
   st.write(
-      "1. رفع ملف الحركات الأساسي (KPI).\n2. رفع ملف المندوبين (اختياري).\n3."
-      " رفع ملف المحفظة (Wallet) لاستخراج رصيد Organization E-Money"
-      " Account."
+      "ارفع **ملف الإكسل نفسه** (الذي يحتوي على ورقة الحركات + ورقة المحفظة"
+      " ك-ورقة ثانية)."
   )
 
-  col_k1, col_k2, col_k3 = st.columns(3)
+  col_k1, col_k2 = st.columns(2)
   with col_k1:
     kpi_uploaded_file = st.file_uploader(
-        "اختر ملف الإكسل الخاص بالحركات (KPI)",
+        "اختر ملف الإكسل (يحتوي على ورقة الحركات + ورقة المحفظة)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_final_v6",
+        key="kpi_main_file_final_v7",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
         "اختر ملف المندوبين (اختياري)",
         type=["xlsx", "xls"],
-        key="kpi_rep_file_final_v6",
-    )
-  with col_k3:
-    wallet_filtered_file = st.file_uploader(
-        "اختر ملف المحفظة (Wallet لاستخراج عمود R)",
-        type=["xlsx", "xls"],
-        key="kpi_wallet_file_final_v6",
+        key="kpi_rep_file_final_v7",
     )
 
   if kpi_uploaded_file is not None:
     try:
-      kpi_df = pd.read_excel(kpi_uploaded_file)
+      # قراءة أسماء الأوراق في ملف الإكسل المرفوع
+      excel_file_obj = pd.ExcelFile(kpi_uploaded_file)
+      sheet_names = excel_file_obj.sheet_names
+      st.info(f"📁 الأوراق المكتشفة داخل الملف: {sheet_names}")
 
-      # قراءة shortCode من العمود E (الفهرس 4) أو بالاسم
+      # قراءة الورقة الأولى للحركات
+      target_sheet_movements = (
+          sheet_names[0] if len(sheet_names) > 0 else 0
+      )
+      kpi_df = pd.read_excel(kpi_uploaded_file, sheet_name=target_sheet_movements)
+
+      # قراءة الورقة الثانية للمحفظة (إذا توفرت، وإلا ناخذ الورقة الثانية أو نفترض نفس الملف)
+      wallet_balance_map = {}
+      if len(sheet_names) > 1:
+        target_sheet_wallet = sheet_names
+        w_df = pd.read_excel(
+            kpi_uploaded_file, sheet_name=target_sheet_wallet
+        )
+        st.caption(
+            f"✅ يتم قراءة رصيد المحفظة من الورقة الثانية:"
+            f" '{target_sheet_wallet}'"
+        )
+      else:
+        w_df = kpi_df
+        st.caption(
+            "⚠️ الملف يحتوي على ورقة واحدة فقط، سيتم البحث فيها أو الدمج."
+        )
+
+      # معالجة shortCode في الحركات
       g_col_name = None
       for col in kpi_df.columns:
         if str(col).strip().lower() in [
@@ -762,86 +781,79 @@ with tab_kpi:
         except Exception:
           pass
 
-      # معالجة شيت المحفظة المحدث (فلترة عمود H + تنظيف عمود R + توحيد الأحرف للمطابقة)
-      wallet_balance_map = {}
-      if wallet_filtered_file is not None:
-        try:
-          w_df = pd.read_excel(wallet_filtered_file)
+      # معالجة شيت المحفظة (الورقة الثانية: فلترة عمود H على Organization E-Money Account وتنظيف عمود R)
+      try:
+        h_col_w = None
+        for col in w_df.columns:
+          if "accounttype" in str(col).lower():
+            h_col_w = col
+            break
+        if not h_col_w and len(w_df.columns) > 7:
+          h_col_w = w_df.columns[7]
 
-          # البحث الذكي عن عمود accountType (H أو بالاسم)
-          h_col_w = None
-          for col in w_df.columns:
-            if "accounttype" in str(col).lower():
-              h_col_w = col
-              break
-          if not h_col_w and len(w_df.columns) > 7:
-            h_col_w = w_df.columns[7]
+        r_col_w = None
+        for col in w_df.columns:
+          if "balance" in str(col).lower():
+            r_col_w = col
+            break
+        if not r_col_w and len(w_df.columns) > 17:
+          r_col_w = w_df.columns[17]
 
-          # البحث الذكي عن عمود balance (R أو بالاسم)
-          r_col_w = None
-          for col in w_df.columns:
-            if "balance" in str(col).lower():
-              r_col_w = col
-              break
-          if not r_col_w and len(w_df.columns) > 17:
-            r_col_w = w_df.columns[17]
+        w_code_col = None
+        for col in w_df.columns:
+          if str(col).strip().lower() in [
+              "shortcode",
+              "short code",
+              "short_code",
+          ]:
+            w_code_col = col
+            break
+        if not w_code_col and len(w_df.columns) > 4:
+          w_code_col = w_df.columns
 
-          # البحث الذكي عن عمود shortCode في المحفظة
-          w_code_col = None
-          for col in w_df.columns:
-            if str(col).strip().lower() in [
-                "shortcode",
-                "short code",
-                "short_code",
-            ]:
-              w_code_col = col
-              break
-          if not w_code_col and len(w_df.columns) > 4:
-            w_code_col = w_df.columns
+        if h_col_w and r_col_w and w_code_col:
+          mask_h = (
+              w_df[h_col_w].astype(str).str.strip()
+              == "Organization E-Money Account"
+          )
+          filtered_w = w_df[mask_h].copy()
 
-          if h_col_w and r_col_w and w_code_col:
-            mask_h = (
-                w_df[h_col_w].astype(str).str.strip()
-                == "Organization E-Money Account"
-            )
-            filtered_w = w_df[mask_h].copy()
+          def clean_balance_val(val):
+            if pd.isna(val):
+              return 0.0
+            s = str(val).strip()
+            if not s:
+              return 0.0
+            neg = False
+            if s.startswith("(") and s.endswith(")"):
+              neg = True
+              s = s[1:-1].strip()
+            s = s.replace(",", "")
+            try:
+              num = float(s)
+              return -num if neg else num
+            except ValueError:
+              return val
 
-            def clean_balance_val(val):
-              if pd.isna(val):
-                return 0.0
-              s = str(val).strip()
-              if not s:
-                return 0.0
-              neg = False
-              if s.startswith("(") and s.endswith(")"):
-                neg = True
-                s = s[1:-1].strip()
-              s = s.replace(",", "")
-              try:
-                num = float(s)
-                return -num if neg else num
-              except ValueError:
-                return val
+          filtered_w["cleaned_R"] = filtered_w[r_col_w].apply(
+              clean_balance_val
+          )
+          filtered_w["key_clean"] = (
+              filtered_w[w_code_col].astype(str).str.strip().str.upper()
+          )
 
-            filtered_w["cleaned_R"] = filtered_w[r_col_w].apply(
-                clean_balance_val
-            )
-            filtered_w["key_clean"] = (
-                filtered_w[w_code_col].astype(str).str.strip().str.upper()
-            )
-
-            num_mask = filtered_w["cleaned_R"].apply(
-                lambda x: isinstance(x, (int, float, np.number))
-            )
-            wallet_balance_map = (
-                filtered_w[num_mask]
-                .groupby("key_clean")["cleaned_R"]
-                .sum()
-                .to_dict()
-            )
-          st.success("✅ تمت معالجة ملف المحفظة وعمود R بنجاح.")
-        except Exception as e_w:
-          st.warning(f"⚠️ تحذير أثناء قراءة ملف المحفظة: {e_w}")
+          num_mask = filtered_w["cleaned_R"].apply(
+              lambda x: isinstance(x, (int, float, np.number))
+          )
+          wallet_balance_map = (
+              filtered_w[num_mask]
+              .groupby("key_clean")["cleaned_R"]
+              .sum()
+              .to_dict()
+          )
+        st.success("✅ تمت معالجة ورقة المحفظة وعمود R بنجاح من داخل الملف.")
+      except Exception as e_w:
+        st.warning(f"⚠️ تحذير أثناء قراءة ورقة المحفظة: {e_w}")
 
       target_ops = [
           "Merchant Payment",
@@ -868,7 +880,6 @@ with tab_kpi:
 
         row_item["Arabic Name (F)"] = f_v
 
-        # إضافة عمود رصيد المحفظة المستخرج مع مطابقة آمنة
         g_str_key = str(g_v).strip().upper()
         wallet_val = wallet_balance_map.get(g_str_key, "لا توجد مطابقة")
         row_item["رصيد المحفظة (عمود R المفلتر)"] = wallet_val
