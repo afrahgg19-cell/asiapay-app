@@ -22,8 +22,13 @@ tab1, tab2, tab3 = st.tabs([
     "⭐ نسب الأداء ونسب الإنجاز والنقاط",
 ])
 
-# اسم قاعدة البيانات المحلية SQLite للمحفظة
-DB_FILE = "wallet_database.db"
+# مسار ثابت لقاعدة البيانات المحلية SQLite للمحفظة لضمان الحفظ الدائم
+BASE_DIR = (
+    os.path.dirname(os.path.abspath(__file__))
+    if "__file__" in locals()
+    else "."
+)
+DB_FILE = os.path.join(BASE_DIR, "wallet_database.db")
 
 
 def init_db():
@@ -46,7 +51,6 @@ def init_db():
 
 
 init_db()
-
 
 # --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
 if "pivot_result" not in st.session_state:
@@ -169,7 +173,7 @@ with tab1:
           )
           conn.commit()
           conn.close()
-          st.success("تم حفظ الإيداع وتحديث الرصيد بنجاح!")
+          st.success("تم حفظ الإيداع وتحديث الرصيد دائمياً بنجاح!")
           st.rerun()
         else:
           st.warning("يرجى إدخال مبلغ صحيح أكبر من صفر.")
@@ -224,7 +228,7 @@ with tab1:
           )
           conn.commit()
           conn.close()
-          st.success("تم حفظ السحب وتحديث الرصيد بنجاح!")
+          st.success("تم حفظ السحب وتحديث الرصيد دائمياً بنجاح!")
           st.rerun()
         else:
           st.warning("يرجى إدخال مبلغ صحيح أكبر من صفر.")
@@ -269,7 +273,7 @@ with tab1:
           )
           conn.commit()
           conn.close()
-          st.success("تم استرجاع المبلغ وإضافته للمحفظة بنجاح!")
+          st.success("تم استرجاع المبلغ وإضافته للمحفظة دائمياً بنجاح!")
           st.rerun()
         else:
           st.warning("يرجى إدخال مبلغ صحيح أكبر من صفر.")
@@ -322,7 +326,6 @@ with tab1:
                     (new_edit_amount, new_edit_reason, selected_row_id),
                 )
                 conn.commit()
-                # إعادة حساب الأرصدة بالتسلسل
                 all_rows = pd.read_sql_query(
                     "SELECT id, operation_type, amount FROM wallet_operations"
                     " ORDER BY id ASC",
@@ -343,7 +346,7 @@ with tab1:
                   )
                 conn.commit()
                 conn.close()
-                st.success("تم تحديث السجل بنجاح!")
+                st.success("تم تحديث وحفظ السجل دائمياً بنجاح!")
                 st.rerun()
 
               if submit_delete:
@@ -374,7 +377,7 @@ with tab1:
                   )
                 conn.commit()
                 conn.close()
-                st.success("تم حذف السجل بنجاح!")
+                st.success("تم حذف السجل وتحديث القاعدة بنجاح!")
                 st.rerun()
   else:
     st.info("لا توجد عمليات مسجلة حتى الآن.")
@@ -440,7 +443,7 @@ with tab1:
         )
         conn.commit()
         conn.close()
-        st.success("تم تسديد المديونية وتحديث حالتها بنجاح!")
+        st.success("تم تسديد المديونية وتحديث حالتها دائمياً!")
         st.rerun()
     else:
       st.info("ممتاز! لا توجد أي مديونيات معلقة حالياً، جميع الحسابات خالصة 🎉.")
@@ -587,10 +590,7 @@ with tab2:
 # ====================================================
 with tab3:
   st.markdown("### ⭐ نسب الأداء، نسب الإنجاز وتقييم النقاط للمكاتب")
-  st.write(
-      "هذا القسم يعتمد مباشرة على بيانات الجرد ومقارنة الشهور لعمود الكود"
-      " (`Short Code`) والاسم (`Arabic Name`)."
-  )
+  target_benchmark = 10000000.0
 
   if (
       st.session_state["combined_df"] is not None
@@ -622,8 +622,6 @@ with tab3:
           )
           .reset_index()
       )
-
-      target_benchmark = 10000000.0
 
       def calc_performance_and_progress(row):
         amt = row["مجموع_المبالغ"]
