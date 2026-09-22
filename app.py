@@ -4,16 +4,19 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
+# إعدادات الصفحة
 st.set_page_config(
     page_title="نظام إدارة المحفظة المالية الكبرى - ASIA PAY", layout="wide"
 )
 
+# --- لوحة التحكم في الأعلى ---
 st.markdown(
     "<h2 style='text-align: center; color: #1E3A8A;'>💰 نظام إدارة المحفظة"
     " المالية - ASIA PAY</h2>",
     unsafe_allow_html=True,
 )
 
+# استخدام الـ Tabs الأربعة العلوية
 tab1, tab2, tab3, tab_kpi = st.tabs([
     "💳 محفظة ASIA PAY",
     "📊 المقارنة بين شهرين",
@@ -21,6 +24,7 @@ tab1, tab2, tab3, tab_kpi = st.tabs([
     "📈 KPI",
 ])
 
+# --- قاعدة بيانات SQLite للمحفظة ---
 DB_FILE = "asia_pay_wallet.db"
 
 
@@ -90,15 +94,7 @@ def get_latest_balance():
   return row[0] if row else 0.0
 
 
-def clean_code(val):
-  if pd.isna(val):
-    return ""
-  s = str(val).strip()
-  if s.endswith(".0"):
-    s = s[:-2]
-  return s
-
-
+# --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
 if "pivot_result" not in st.session_state:
   st.session_state["pivot_result"] = None
 if "combined_df" not in st.session_state:
@@ -106,14 +102,17 @@ if "combined_df" not in st.session_state:
 if "perf_summary" not in st.session_state:
   st.session_state["perf_summary"] = None
 
+
 # ====================================================
-# القسم الأول: محفظة ASIA PAY
+# القسم الأول: محفظة ASIA PAY (بدون أصفار مزعجة في الحقول)
 # ====================================================
 with tab1:
   st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
   st.markdown("---")
+
   df = load_wallet_from_db()
   last_balance = get_latest_balance()
+
   total_deposit = (
       df[df["نوع العملية"] == "إيداع للمحفظة"]["المبلغ"].sum()
       if not df.empty and "نوع العملية" in df.columns
@@ -136,6 +135,7 @@ with tab1:
     )
 
   st.markdown("---")
+
   c1, c2, c3 = st.columns(3)
   with c1:
     st.subheader("📥 إيداع للمحفظة")
@@ -282,11 +282,133 @@ with tab1:
     display_df = df.drop(columns=["id"], errors="ignore")
     st.dataframe(display_df, use_container_width=True)
 
+    with st.expander("✏️ تعديل أو حذف عملية سابقة من السجل"):
+      if "id" in df.columns:
+        row_ids = df["id"].tolist()
+        selected_id = st.selectbox(
+            "اختر رقم السجل (ID) للتعديل أو الحذف:", row_ids
+        )
+        if selected_id:
+          row_data = df[df["id"] == selected_id].iloc[0]
+          with st.form("edit_row_form"):
+            st.write(
+                f"تعديل السجل ID: {selected_id} | التاريخ:"
+                f" {row_data['التاريخ']}"
+            )
+            new_edit_amount = st.number_input(
+                "تعديل المبلغ",
+                value=float(row_data["المبلغ"]),
+                step=1000.0,
+                format="%.2f",
+            )
+            new_edit_reason = st.text_input(
+                "تعديل التفاصيل / الجهة / السبب",
+                value=str(row_data["التفاصيل / الجهة / السبب"]),
+            )
+
+            col_e1, col_e2 = st.columns(2)
+            submit_edit = col_e1.form_submit_button("💾 حفظ التعديلات")
+            submit_delete = col_e2.form_submit_button(
+                "🗑️ حذف هذا السجل نهائياً"
+            )
+
+            if submit_edit:
+              conn = sqlite3.connect(DB_FILE)
+              c = conn.cursor()
+              c.execute(
+                  """
+                                UPDATE wallet_operations 
+                                SET amount = ?, details = ? 
+                                WHERE id = ?
+                            """,
+                  (new_edit_amount, new_edit_reason, int(selected_id)),
+              )
+              conn.commit()
+              conn.close()
+              st.success("تم تحديث السجل بنجاح!")
+              st.rerun()
+
+            if submit_delete:
+              conn = sqlite3.connect(DB_FILE)
+              c = conn.cursor()
+              c.execute(
+                  "DELETE FROM wallet_operations WHERE id = ?",
+                  (int(selected_id),),
+              )
+              conn.commit()
+              conn.close()
+              st.success("تم حذف السجل بنجاح!")
+              st.rerun()
+  else:
+    st.info("لا توجد عمليات مسجلة حتى الآن.")
+
+  st.markdown("---")
+  st.subheader("📊 جرد الحسابات والإحصائيات الشاملة")
+  if not df.empty:
+    total_withdrawn = (
+        df[df["نوع العملية"] == "سحب كاش"]["المبلغ"].sum()
+        if "نوع العملية" in df.columns
+        else 0.0
+    )
+    total_returned = (
+        df[df["نوع العملية"] == "استرجاع للمحفظة"]["المبلغ"].sum()
+        if "نوع العملية" in df.columns
+        else 0.0
+    )
+    current_remaining = get_latest_balance()
+
+    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+    with col_s1:
+      st.metric("إجمالي السحوبات", f"{total_withdrawn:,.2f} د.ع")
+    with col_s2:
+      st.metric("إجمالي الإيداعات", f"{total_deposit:,.2f} د.ع")
+    with col_s3:
+      st.metric("إجمالي المبالغ المسترجعة", f"{total_returned:,.2f} د.ع")
+    with col_s4:
+      st.metric("صافي رصيد المحفظة النهائي", f"{current_remaining:,.2f} د.ع")
+
+  st.markdown("---")
+  st.subheader("📋 قائمة الأشخاص والجهات المديونة (غير المسددة)")
+  if "حالة الديون" in df.columns:
+    debts_df = df[df["حالة الديون"] == "غير مسدد (مديونية)"]
+    if not debts_df.empty:
+      st.warning(f"تنبيه: لديك {len(debts_df)} مديونيات غير مسددة حالياً.")
+      debt_list = []
+      debt_map = {}
+      for idx, row in debts_df.iterrows():
+        label_text = f"ID ({row['id']}) - الجهة/الشخص: {row['التفاصيل / الجهة / السبب']} - المبلغ: {row['المبلغ']} د.ع"
+        debt_list.append(label_text)
+        debt_map[label_text] = row["id"]
+
+      selected_debt_label = st.selectbox(
+          "اختر المديونية لتسديدها:", debt_list
+      )
+      if st.button("✅ تم التسديد (تحديث وإزالة من المديونية)"):
+        real_id = debt_map[selected_debt_label]
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute(
+            """
+                    UPDATE wallet_operations 
+                    SET debt_status = 'تم التسديد' 
+                    WHERE id = ?
+                """,
+            (int(real_id),),
+        )
+        conn.commit()
+        conn.close()
+        st.success("تم تسديد المديونية وتحديث حالتها بنجاح!")
+        st.rerun()
+    else:
+      st.info("ممتاز! لا توجد أي مديونيات معلقة حالياً، جميع الحسابات خالصة 🎉.")
+
 # ====================================================
 # القسم الثاني: المقارنة بين شهرين
 # ====================================================
 with tab2:
   st.markdown("### 📊 المقارنة بين أداء المكاتب بين شهرين")
+  st.write("قم برفع ملف الشهر الأول والملف الثاني المقارن أدناه.")
+
   col_u1, col_u2 = st.columns(2)
   with col_u1:
     uploaded_file_8 = st.file_uploader(
@@ -301,110 +423,273 @@ with tab2:
     try:
       df8 = pd.read_excel(uploaded_file_8)
       df9 = pd.read_excel(uploaded_file_9)
+
       df8["Month"] = "الشهر الأول"
       df9["Month"] = "الشهر الثاني"
+
       combined_df = pd.concat([df8, df9], ignore_index=True)
+
+      amt_candidates = [
+          c
+          for c in combined_df.columns
+          if "amount" in str(c).lower() or "مبلغ" in str(c)
+      ]
+      amt_col = (
+          amt_candidates[0] if amt_candidates else combined_df.columns[0]
+      )
+
+      def clean_amount(val):
+        if pd.isna(val):
+          return 0.0
+        val_str = str(val).replace(",", "").strip()
+        try:
+          return float(val_str)
+        except:
+          return 0.0
+
+      combined_df["Cleaned_Amount"] = combined_df[amt_col].apply(clean_amount)
+
+      translation_dict = {
+          (
+              "Agency Commission Roll Up from Independent Store to Head Office"
+          ): "ترحيل عمولات الوكالة من المتاجر المستقلة إلى الإدارة الرئيسية",
+          "Auto Claw Back": "استرجاع تلقائي للأموال",
+          "Commission Payment for Head Office": "دفع العمولات للإدارة الرئيسية",
+          "Commission Payment for Independent Stores": (
+              "دفع العمولات للمتاجر المستقلة"
+          ),
+          "Commission Roll Down for Independent Store": (
+              "تنزيل العمولات للمتاجر المستقلة"
+          ),
+          "Customer Buy Goods Fee from Merchant": "أجور شراء بضائع من التاجر",
+          "Customer Deposit at Agent": "إيداع نقدي للزبون لدى الوكيل",
+          "Customer Withdraw at Agent": "سحب نقدي للزبون لدى الوكيل",
+          "Organization Buy Airtime": "شراء رصيد / تعبئة من المؤسسة",
+          "Organization Buy Electronic Vouchers": "شراء قسائم إلكترونية من المؤسسة",
+          "Organization Deposit of Funds": "إيداع أموال للمؤسسة",
+          (
+              "Organization Inter Account Transfer - ORG to Agent"
+          ): "تحويل بين حساب المؤسسة وحساب الوكيل",
+          (
+              "Organization Intra Account Transfer - Child to Child"
+          ): "تحويل داخلي بين الفروع",
+      }
+
+      reason_col = (
+          "Reason Type"
+          if "Reason Type" in combined_df.columns
+          else combined_df.columns[0]
+      )
+      combined_df["Arabic Translation"] = combined_df[reason_col].apply(
+          lambda x: translation_dict.get(str(x), str(x))
+      )
+
+      code_col = (
+          "Short Code"
+          if "Short Code" in combined_df.columns
+          else ("G" if "G" in combined_df.columns else combined_df.columns[0])
+      )
+      name_col = (
+          "Arabic Name"
+          if "Arabic Name" in combined_df.columns
+          else (
+              "F"
+              if "F" in combined_df.columns
+              else (
+                  combined_df.columns
+                  if len(combined_df.columns) > 1
+                  else combined_df.columns[0]
+              )
+          )
+      )
+
+      combined_df["عدد حركات"] = 1
+
+      pivot_result = combined_df.pivot_table(
+          index=[code_col, name_col, reason_col, "Arabic Translation"],
+          columns="Month",
+          values=["Cleaned_Amount", "عدد حركات"],
+          aggfunc={"Cleaned_Amount": "sum", "عدد حركات": "sum"},
+          fill_value=0,
+      ).reset_index()
+
+      st.session_state["pivot_result"] = pivot_result
       st.session_state["combined_df"] = combined_df
-      st.success("✅ تم تحميل ومعالجة ملفات المقارنة بنجاح!")
+
+      st.success("✅ تمت معالجة وحفظ المقارنة بين الشهرين بنجاح!")
+
     except Exception as e:
-      st.error(f"⚠️ خطأ: {e}")
+      st.error(f"⚠️ حدث خطأ أثناء المعالجة: {e}")
+
+  if st.session_state["pivot_result"] is not None:
+    st.subheader("📋 جدول مقارنة الجرد المحفوظ")
+    st.dataframe(st.session_state["pivot_result"], use_container_width=True)
+
+    output_filename = "Final_Inventory_Comparison_Report.xlsx"
+    buffer_pivot = BytesIO()
+
+    df_to_save_pivot = st.session_state["pivot_result"].copy()
+    if isinstance(df_to_save_pivot.columns, pd.MultiIndex):
+      df_to_save_pivot.columns = [
+          "_".join([str(c) for c in col if c])
+          for col in df_to_save_pivot.columns
+      ]
+
+    with pd.ExcelWriter(buffer_pivot, engine="openpyxl") as writer:
+      df_to_save_pivot.to_excel(writer, index=False)
+    buffer_pivot.seek(0)
+
+    st.download_button(
+        label="📥 تحميل تقرير المقارنة (Excel)",
+        data=buffer_pivot,
+        file_name=output_filename,
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
+  else:
+    st.info("💡 يرجى رفع ملفات الشهرين في الأعلى لعرض وجرد البيانات.")
 
 # ====================================================
-# القسم الثالث: نسبة الإنجاز
+# القسم الثالث: نسبة الإنجاز للمقارنة بين شهرين
 # ====================================================
 with tab3:
   st.markdown("### ⭐ نسبة الإنجاز والتقييم للمقارنة بين شهرين")
-  st.info("قسم الإنجاز مرتبط ببيانات المقارنة.")
+  st.write(
+      "هذا القسم يعتمد على بيانات المقارنة بين الشهور لتقييم إنجاز المكاتب."
+  )
+
+  if (
+      st.session_state["combined_df"] is not None
+      and not st.session_state["combined_df"].empty
+  ):
+    df_combined = st.session_state["combined_df"]
+
+    code_col = (
+        "Short Code"
+        if "Short Code" in df_combined.columns
+        else ("G" if "G" in df_combined.columns else df_combined.columns[0])
+    )
+    name_col = (
+        "Arabic Name"
+        if "Arabic Name" in df_combined.columns
+        else (
+            "F"
+            if "F" in df_combined.columns
+            else (
+                df_combined.columns
+                if len(df_combined.columns) > 1
+                else df_combined.columns[0]
+            )
+        )
+    )
+
+    if code_col in df_combined.columns and name_col in df_combined.columns:
+      perf_summary = (
+          df_combined.groupby([code_col, name_col])
+          .agg(
+              إجمالي_العمليات=("Cleaned_Amount", "count"),
+              مجموع_المبالغ=("Cleaned_Amount", "sum"),
+          )
+          .reset_index()
+      )
+
+      target_benchmark = 10000000.0
+
+      def calc_performance_and_progress(row):
+        amt = row["مجموع_المبالغ"]
+        progress_pct = min(100.0, (amt / target_benchmark) * 100.0)
+
+        if amt > 5000000:
+          perf_desc = "ممتاز (95%)"
+          points = int(amt / 10000)
+        elif amt > 2000000:
+          perf_desc = "جيد جداً (85%)"
+          points = int(amt / 10000)
+        elif amt > 500000:
+          perf_desc = "جيد (75%)"
+          points = int(amt / 10000)
+        else:
+          perf_desc = "مقبول (60%)"
+          points = int(amt / 10000)
+        return pd.Series([perf_desc, progress_pct, points])
+
+      perf_summary[[
+          "نسبة الأداء",
+          "نسبة الإنجاز (%)",
+          "النقاط المكتسبة",
+      ]] = perf_summary.apply(calc_performance_and_progress, axis=1)
+
+      st.session_state["perf_summary"] = perf_summary
+      st.success("✅ تم احتساب نسبة الإنجاز والتقييم للمكاتب!")
+      st.dataframe(perf_summary, use_container_width=True)
+
+      st.markdown("### 📈 مقارنة نسب الإنجاز للمكاتب")
+      chart_df = perf_summary.set_index(name_col)["نسبة الإنجاز (%)"]
+      st.bar_chart(chart_df)
+    else:
+      st.warning("⚠️ الأعمدة المطلوبة غير مطابقة.")
+  else:
+    st.info(
+        "📌 يرجى رفع ملفات الشهرين في تبويب **(📊 المقارنة بين شهرين)** أولاً."
+    )
 
 # ====================================================
-# التبويب الرابع: KPI
+# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون + عدد الحركات > 4999)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "ارفع **ملف الإكسل الرئيسي** (الشيت الأول للحركات + الشيت الثاني"
-      " `Transaction Report` أو `wallet report`)."
+      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع ملف المندوبين (اختياري"
+      " لربط الأسماء تلقائياً بالاعتماد على Short Code)."
   )
 
   col_k1, col_k2 = st.columns(2)
   with col_k1:
     kpi_uploaded_file = st.file_uploader(
-        "ملف الإكسل الرئيسي", type=["xlsx", "xls"], key="kpi_main_single_v10"
+        "اختر ملف الإكسل الخاص بالحركات (KPI)",
+        type=["xlsx", "xls"],
+        key="kpi_main_file_final_v5",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
-        "ملف المندوبين (اختياري)",
+        "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
         type=["xlsx", "xls"],
-        key="kpi_rep_single_v10",
+        key="kpi_rep_file_final_v5",
     )
 
   if kpi_uploaded_file is not None:
     try:
-      excel_file_obj = pd.ExcelFile(kpi_uploaded_file)
-      sheet_names = excel_file_obj.sheet_names
-      kpi_df = pd.read_excel(excel_file_obj, sheet_name=sheet_names[0])
+      kpi_df = pd.read_excel(kpi_uploaded_file)
 
-      wallet_report_sheet_name = None
-      for s_name in sheet_names:
-        l_name = str(s_name).lower()
-        if (
-            "wallet" in l_name
-            or "report" in l_name
-            or "transaction" in l_name
-        ):
-          wallet_report_sheet_name = s_name
-          break
-      if not wallet_report_sheet_name and len(sheet_names) > 1:
-        wallet_report_sheet_name = sheet_names
+      def get_col_safe(preferred_name, fallback_idx, df_target):
+        if preferred_name in df_target.columns:
+          return preferred_name
+        cols_local = [str(c).strip() for c in df_target.columns.tolist()]
+        if len(cols_local) > fallback_idx:
+          return df_target.columns[fallback_idx]
+        return df_target.columns[0] if len(cols_local) > 0 else None
 
-      g_col_name = (
-          "Short Code"
-          if "Short Code" in kpi_df.columns
-          else (
-              kpi_df.columns[6]
-              if len(kpi_df.columns) > 6
-              else kpi_df.columns[0]
-          )
-      )
-      f_col_name = (
-          "Arabic Name"
-          if "Arabic Name" in kpi_df.columns
-          else (
-              kpi_df.columns[5]
-              if len(kpi_df.columns) > 5
-              else kpi_df.columns[0]
-          )
-      )
-      b_col_name = (
-          "B"
-          if "B" in kpi_df.columns
-          else (
-              kpi_df.columns
-              if len(kpi_df.columns) > 1
-              else kpi_df.columns[0]
-          )
-      )
-      t_col_name = (
-          "T"
-          if "T" in kpi_df.columns
-          else (
-              kpi_df.columns[19]
-              if len(kpi_df.columns) > 19
-              else kpi_df.columns[-1]
-          )
-      )
+      g_col_name = get_col_safe("Short Code", 6, kpi_df)
+      f_col_name = get_col_safe("Arabic Name", 5, kpi_df)
+      b_col_name = get_col_safe("B", 1, kpi_df)
+      t_col_name = get_col_safe("T", 19, kpi_df)
 
       work_kpi = pd.DataFrame()
-      work_kpi["G_clean"] = kpi_df[g_col_name].apply(clean_code)
+      work_kpi["G_clean"] = (
+          kpi_df[g_col_name].astype(str).str.strip()
+          if g_col_name in kpi_df.columns
+          else pd.Series([""] * len(kpi_df))
+      )
       work_kpi["F_clean"] = (
           kpi_df[f_col_name].astype(str).str.strip()
           if f_col_name in kpi_df.columns
-          else ""
+          else pd.Series([""] * len(kpi_df))
       )
       work_kpi["B_clean"] = (
           kpi_df[b_col_name].astype(str).str.strip()
           if b_col_name in kpi_df.columns
-          else ""
+          else pd.Series([""] * len(kpi_df))
       )
 
       raw_t_series = (
@@ -421,75 +706,46 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      e_money_map = {}
-      if wallet_report_sheet_name:
-        try:
-          w_rep_df = pd.read_excel(
-              excel_file_obj, sheet_name=wallet_report_sheet_name
-          )
-          h_col = (
-              w_rep_df.columns[7]
-              if len(w_rep_df.columns) > 7
-              else w_rep_df.columns[0]
-          )
-          r_col = (
-              w_rep_df.columns[17]
-              if len(w_rep_df.columns) > 17
-              else w_rep_df.columns[-1]
-          )
-          e_col = (
-              w_rep_df.columns
-              if len(w_rep_df.columns) > 4
-              else w_rep_df.columns[0]
-          )
-
-          filtered_w = w_rep_df[
-              w_rep_df[h_col].astype(str).str.strip().str.lower()
-              == "organization e-money account".lower()
-          ].copy()
-
-          def clean_r_val(val):
-            if pd.isna(val):
-              return 0.0
-            try:
-              return float(str(val).replace(",", "").strip())
-            except:
-              return 0.0
-
-          filtered_w["clean_R"] = filtered_w[r_col].apply(clean_r_val)
-          filtered_w["e_code_clean"] = filtered_w[e_col].apply(clean_code)
-
-          grouped_e = filtered_w.groupby("e_code_clean")["clean_R"].sum()
-          e_money_map = grouped_e.to_dict()
-          st.success(
-              f"✅ تمت فلترة الشيت ({wallet_report_sheet_name}) لـ Organization"
-              f" E-Money Account بنجاح."
-          )
-        except Exception as e_w:
-          st.warning(f"⚠️ تعذر تحليل شيت wallet report: {e_w}")
-
+      # فحص هل تم رفع ملف المندوبين؟
       has_rep_file = rep_uploaded_file is not None
       rep_map_dict = {}
+
       if has_rep_file:
         try:
           rep_df = pd.read_excel(rep_uploaded_file)
           rep_code_col, rep_name_col = None, None
           for col in rep_df.columns:
             c_low = str(col).lower()
-            if "short" in c_low or "code" in c_low or "كود" in str(col):
+            if (
+                "short" in c_low
+                or "code" in c_low
+                or "كود" in str(col)
+                or "short code" in c_low
+            ):
               rep_code_col = col
-            if "مندوب" in str(col) or "rep" in c_low or "اسم" in str(col):
+            if (
+                "مندوب" in str(col)
+                or "representative" in c_low
+                or "rep" in c_low
+                or "اسم" in str(col)
+            ):
               rep_name_col = col
+
           if not rep_code_col and len(rep_df.columns) > 0:
             rep_code_col = rep_df.columns[0]
           if not rep_name_col and len(rep_df.columns) > 1:
             rep_name_col = rep_df.columns
+
           if rep_code_col and rep_name_col:
             for _, rrow in rep_df.iterrows():
-              c_val = clean_code(rrow[rep_code_col])
+              c_val = str(rrow[rep_code_col]).strip()
               n_val = str(rrow[rep_name_col]).strip()
               rep_map_dict[c_val] = n_val
-        except Exception:
+          st.success("✅ تم ربط أسماء المندوبين بنجاح.")
+        except Exception as e_rep:
+          st.warning(
+              f"⚠️تعذر قراءة ملف المندوبين، سيتم الاستمرار بدونهم: {e_rep}"
+          )
           has_rep_file = False
 
       target_ops = [
@@ -507,18 +763,15 @@ with tab_kpi:
       for (g_v, f_v), grp in work_kpi.groupby(
           ["G_clean", "F_clean"], dropna=False
       ):
-        g_clean_str = clean_code(g_v)
         row_item = {
-            "Short Code (G)": g_clean_str,
-            "Arabic Name (F)": f_v,
+            "Short Code (G)": g_v,
         }
         if has_rep_file:
           row_item["اسم المندوب"] = rep_map_dict.get(
-              g_clean_str, "غير محدد"
+              str(g_v).strip(), "غير محدد"
           )
 
-        e_val_raw = e_money_map.get(g_clean_str, 0.0)
-        row_item["Organization E-Money Account"] = f"{e_val_raw:,.2f}"
+        row_item["Arabic Name (F)"] = f_v
 
         for op in target_ops:
           count_val = grp["B_clean"].str.lower() == op.lower()
@@ -528,12 +781,15 @@ with tab_kpi:
             grp["B_clean"].str.lower() == "business to business transfer"
         )
         total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
-        row_item["مجموع مبالغ Business to Business Transfer"] = (
+
+        formatted_b2b = (
             f"{int(total_b2b_sum):,}"
             if total_b2b_sum == int(total_b2b_sum)
             else f"{total_b2b_sum:,.2f}"
         )
+        row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
+        # --- إضافة عمودي شروط B2B للـ 100 ألف والـ 3 مليون ---
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
         )
@@ -541,6 +797,7 @@ with tab_kpi:
             "Done" if total_b2b_sum > 2999000 else ""
         )
 
+        # --- شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done) ---
         high_t_count = int((grp["T_num"] > 4999).sum())
         row_item["عدد الحركات > 4999 (4+)"] = (
             "Done" if high_t_count >= 4 else ""
@@ -549,24 +806,38 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI المحدث")
+      st.subheader("📋 نتيجة تقرير الـ KPI")
       st.dataframe(final_kpi_table, use_container_width=True)
 
+      out_kpi_name = (
+          "KPI_Report_With_Reps.xlsx"
+          if has_rep_file
+          else "KPI_Report_Standard.xlsx"
+      )
       buffer_kpi = BytesIO()
+
+      df_to_save_kpi = final_kpi_table.copy()
+      if isinstance(df_to_save_kpi.columns, pd.MultiIndex):
+        df_to_save_kpi.columns = [
+            "_".join([str(c) for c in col if c])
+            for col in df_to_save_kpi.columns
+        ]
+
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
-        final_kpi_table.to_excel(writer, index=False)
+        df_to_save_kpi.to_excel(writer, index=False)
       buffer_kpi.seek(0)
 
       st.download_button(
           label="📥 تحميل تقرير KPI نهائي (Excel)",
           data=buffer_kpi,
-          file_name="KPI_Report_With_Wallet_E_Money.xlsx",
+          file_name=out_kpi_name,
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
+          key="download_kpi_excel_ultimate_final_v5",
       )
 
     except Exception as err:
       st.error(f"⚠️ خطأ أثناء معالجة ملف الـ KPI: {err}")
   else:
-    st.info("📌 يرجى رفع ملف الإكسل الرئيسي لعرض النتائج.")
+    st.info("📌 يرجى رفع ملف الإكسل الرئيسي للـ KPI على الأقل لعرض النتائج.")
