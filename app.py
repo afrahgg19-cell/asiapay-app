@@ -635,7 +635,7 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون)
+# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون + عدد الحركات > 4999)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
@@ -649,13 +649,13 @@ with tab_kpi:
     kpi_uploaded_file = st.file_uploader(
         "اختر ملف الإكسل الخاص بالحركات (KPI)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_final_v4",
+        key="kpi_main_file_final_v5",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
         "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
         type=["xlsx", "xls"],
-        key="kpi_rep_file_final_v4",
+        key="kpi_rep_file_final_v5",
     )
 
   if kpi_uploaded_file is not None:
@@ -789,12 +789,18 @@ with tab_kpi:
         )
         row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
-        # --- إضافة عمودي شروط B2B ---
+        # --- إضافة عمودي شروط B2B للـ 100 ألف والـ 3 مليون ---
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
         )
         row_item["حركه ال3 مليون"] = (
             "Done" if total_b2b_sum > 2999000 else ""
+        )
+
+        # --- شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done) ---
+        high_t_count = int((grp["T_num"] > 4999).sum())
+        row_item["عدد الحركات > 4999 (4+)"] = (
+            "Done" if high_t_count >= 4 else ""
         )
 
         kpi_rows_list.append(row_item)
@@ -828,7 +834,7 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_ultimate_final_v4",
+          key="download_kpi_excel_ultimate_final_v5",
       )
 
     except Exception as err:
