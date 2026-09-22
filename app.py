@@ -635,7 +635,7 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مرن تماماً: يعمل على الأول، ولو رفعت الثاني يدمج المندوبين مع فواصل 100,000)
+# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
@@ -649,13 +649,13 @@ with tab_kpi:
     kpi_uploaded_file = st.file_uploader(
         "اختر ملف الإكسل الخاص بالحركات (KPI)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_final_v3",
+        key="kpi_main_file_final_v4",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
         "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
         type=["xlsx", "xls"],
-        key="kpi_rep_file_final_v3",
+        key="kpi_rep_file_final_v4",
     )
 
   if kpi_uploaded_file is not None:
@@ -789,6 +789,14 @@ with tab_kpi:
         )
         row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
+        # --- إضافة عمودي شروط B2B ---
+        row_item["حركه ال100 الف"] = (
+            "Done" if total_b2b_sum > 99000 else ""
+        )
+        row_item["حركه ال3 مليون"] = (
+            "Done" if total_b2b_sum > 2999000 else ""
+        )
+
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
@@ -820,7 +828,7 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_ultimate_final",
+          key="download_kpi_excel_ultimate_final_v4",
       )
 
     except Exception as err:
