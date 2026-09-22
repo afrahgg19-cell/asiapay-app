@@ -1,3 +1,4 @@
+from io import BytesIO
 import os
 import sqlite3
 import pandas as pd
@@ -517,16 +518,19 @@ with tab2:
     st.dataframe(st.session_state["pivot_result"], use_container_width=True)
 
     output_filename = "Final_Inventory_Comparison_Report.xlsx"
-    st.session_state["pivot_result"].to_excel(output_filename, index=False)
-    with open(output_filename, "rb") as f:
-      st.download_button(
-          label="📥 تحميل تقرير المقارنة (Excel)",
-          data=f,
-          file_name=output_filename,
-          mime=(
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          ),
-      )
+    buffer_pivot = BytesIO()
+    with pd.ExcelWriter(buffer_pivot, engine="openpyxl") as writer:
+      st.session_state["pivot_result"].to_excel(writer, index=False)
+    buffer_pivot.seek(0)
+
+    st.download_button(
+        label="📥 تحميل تقرير المقارنة (Excel)",
+        data=buffer_pivot,
+        file_name=output_filename,
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
   else:
     st.info("💡 يرجى رفع ملفات الشهرين في الأعلى لعرض وجرد البيانات.")
 
@@ -631,7 +635,6 @@ with tab_kpi:
       kpi_df = pd.read_excel(kpi_uploaded_file)
       cols_list = kpi_df.columns.tolist()
 
-      # تحديد المواقع آمنًا (A=0, B=1, C=2, F=5, H=7, T=19)
       h_idx = 7 if len(cols_list) > 7 else 0
       f_idx = 5 if len(cols_list) > 5 else 0
       c_idx = 2 if len(cols_list) > 2 else 0
@@ -658,7 +661,6 @@ with tab_kpi:
           else kpi_df.iloc[:, c_idx].astype(str).str.strip()
       )
 
-      # استخراج عمود T كنص ومعالجة القيم النصية
       raw_t_series = (
           kpi_df["T"].astype(str)
           if "T" in kpi_df.columns
@@ -666,7 +668,6 @@ with tab_kpi:
       )
       work_kpi["T_text"] = raw_t_series.str.strip()
 
-      # تحويل النصوص في عمود T إلى قيم رقمية بدقة (مع التعامل مع الفواصل الآلاف)
       cleaned_t_numeric = (
           work_kpi["T_text"]
           .str.replace(",", "", regex=False)
@@ -685,7 +686,6 @@ with tab_kpi:
             "Arabic Name (F)": f_v,
         }
 
-        # عدد العمليات لكل نوع من عمود C
         c_value_counts = grp["C_clean"].value_counts()
         for op_name, op_count in c_value_counts.items():
           col_key = f"عدد ({op_name})"
@@ -693,17 +693,14 @@ with tab_kpi:
             row_item[col_key] = 0
           row_item[col_key] += op_count
 
-        # فلترة عمليات business to business transfer (مطابقة غير حساسة لحالة الأحرف)
         b2b_mask = (
             grp["C_clean"]
             .str.lower()
             .str.contains("business to business transfer", na=False)
         )
 
-        # جمع الأرقام المحولة من عمود T لهذه الصفوف
         b2b_total_num = grp.loc[b2b_mask, "T_num"].sum()
 
-        # الاحتفاظ بالنصوص الأصلية للمقارنة أو العرض
         b2b_texts = [
             t
             for t in grp.loc[b2b_mask, "T_text"].tolist()
@@ -722,17 +719,20 @@ with tab_kpi:
       st.dataframe(final_kpi_table, use_container_width=True)
 
       out_kpi_name = "KPI_Report_Summary.xlsx"
-      final_kpi_table.to_excel(out_kpi_name, index=False)
-      with open(out_kpi_name, "rb") as f_down:
-        st.download_button(
-            label="📥 تحميل تقرير KPI نهائي (Excel)",
-            data=f_down,
-            file_name=out_kpi_name,
-            mime=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
-            key="download_kpi_excel",
-        )
+      buffer_kpi = BytesIO()
+      with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
+        final_kpi_table.to_excel(writer, index=False)
+      buffer_kpi.seek(0)
+
+      st.download_button(
+          label="📥 تحميل تقرير KPI نهائي (Excel)",
+          data=buffer_kpi,
+          file_name=out_kpi_name,
+          mime=(
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          ),
+          key="download_kpi_excel",
+      )
 
     except Exception as err:
       st.error(f"⚠️ خطأ أثناء معالجة ملف الـ KPI: {err}")
