@@ -635,13 +635,13 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون + عدد الحركات > 4999)
+# التبويب الرابع: KPI (دمج جميع أعمدة الإكسل الاختياري عبر Short Code)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع ملف المندوبين (اختياري"
-      " لربط الأسماء تلقائياً بالاعتماد على Short Code)."
+      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع الإكسل الاختياري (سيتم"
+      " دمج جميع أعمدته مباشرة عبر Short Code)."
   )
 
   col_k1, col_k2 = st.columns(2)
@@ -649,13 +649,13 @@ with tab_kpi:
     kpi_uploaded_file = st.file_uploader(
         "اختر ملف الإكسل الخاص بالحركات (KPI)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_final_v5",
+        key="kpi_main_file_merged_v8",
     )
   with col_k2:
-    rep_uploaded_file = st.file_uploader(
-        "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
+    opt_uploaded_file = st.file_uploader(
+        "اختر الإكسل الاختياري (يحتوي على Short Code وأي بيانات إضافية)",
         type=["xlsx", "xls"],
-        key="kpi_rep_file_final_v5",
+        key="kpi_opt_file_merged_v8",
     )
 
   if kpi_uploaded_file is not None:
@@ -706,47 +706,38 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # فحص هل تم رفع ملف المندوبين؟
-      has_rep_file = rep_uploaded_file is not None
-      rep_map_dict = {}
+      # --- قراءة الإكسل الاختياري واستخراج كافة الأعمدة غير الـ Short Code ---
+      has_opt_file = opt_uploaded_file is not None
+      opt_lookup = {}
+      opt_extra_cols = []
 
-      if has_rep_file:
+      if has_opt_file:
         try:
-          rep_df = pd.read_excel(rep_uploaded_file)
-          rep_code_col, rep_name_col = None, None
-          for col in rep_df.columns:
-            c_low = str(col).lower()
-            if (
-                "short" in c_low
-                or "code" in c_low
-                or "كود" in str(col)
-                or "short code" in c_low
-            ):
-              rep_code_col = col
-            if (
-                "مندوب" in str(col)
-                or "representative" in c_low
-                or "rep" in c_low
-                or "اسم" in str(col)
-            ):
-              rep_name_col = col
+          opt_df = pd.read_excel(opt_uploaded_file)
+          opt_code_col = None
+          for c in opt_df.columns:
+            c_low = str(c).lower()
+            if "short" in c_low and "code" in c_low:
+              opt_code_col = c
+              break
+          if not opt_code_col and len(opt_df.columns) > 0:
+            opt_code_col = opt_df.columns[0]
 
-          if not rep_code_col and len(rep_df.columns) > 0:
-            rep_code_col = rep_df.columns[0]
-          if not rep_name_col and len(rep_df.columns) > 1:
-            rep_name_col = rep_df.columns
+          opt_extra_cols = [c for c in opt_df.columns if c != opt_code_col]
 
-          if rep_code_col and rep_name_col:
-            for _, rrow in rep_df.iterrows():
-              c_val = str(rrow[rep_code_col]).strip()
-              n_val = str(rrow[rep_name_col]).strip()
-              rep_map_dict[c_val] = n_val
-          st.success("✅ تم ربط أسماء المندوبين بنجاح.")
-        except Exception as e_rep:
+          for _, rrow in opt_df.iterrows():
+            c_key = str(rrow[opt_code_col]).strip()
+            opt_lookup[c_key] = {
+                ec: (rrow[ec] if pd.notna(rrow[ec]) else "")
+                for ec in opt_extra_cols
+            }
+          st.success("✅ تم قراءة الإكسل الاختياري ودمج أعمدته بنجاح.")
+        except Exception as e_opt:
           st.warning(
-              f"⚠️تعذر قراءة ملف المندوبين، سيتم الاستمرار بدونهم: {e_rep}"
+              f"⚠️تعذر قراءة الإكسل الاختياري، سيتم المتابعة بدونه: {e_opt}"
           )
-          has_rep_file = False
+          has_opt_file = False
+          opt_extra_cols = []
 
       target_ops = [
           "Merchant Payment",
@@ -763,13 +754,18 @@ with tab_kpi:
       for (g_v, f_v), grp in work_kpi.groupby(
           ["G_clean", "F_clean"], dropna=False
       ):
+        g_clean_str = str(g_v).strip()
         row_item = {
             "Short Code (G)": g_v,
         }
-        if has_rep_file:
-          row_item["اسم المندوب"] = rep_map_dict.get(
-              str(g_v).strip(), "غير محدد"
-          )
+
+        # حقن جميع أعمدة الملف الاختياري المطبقة على Short Code
+        if has_opt_file:
+          if g_clean_str in opt_lookup:
+            row_item.update(opt_lookup[g_clean_str])
+          else:
+            for ec in opt_extra_cols:
+              row_item[ec] = ""
 
         row_item["Arabic Name (F)"] = f_v
 
@@ -789,7 +785,7 @@ with tab_kpi:
         )
         row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
-        # --- إضافة عمودي شروط B2B للـ 100 ألف والـ 3 مليون ---
+        # --- شروط B2B للـ 100 ألف والـ 3 مليون ---
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
         )
@@ -806,12 +802,12 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI")
+      st.subheader("📋 نتيجة تقرير الـ KPI (مدمج مع الإكسل الاختياري)")
       st.dataframe(final_kpi_table, use_container_width=True)
 
       out_kpi_name = (
-          "KPI_Report_With_Reps.xlsx"
-          if has_rep_file
+          "KPI_Report_Merged_Optional.xlsx"
+          if has_opt_file
           else "KPI_Report_Standard.xlsx"
       )
       buffer_kpi = BytesIO()
@@ -828,13 +824,13 @@ with tab_kpi:
       buffer_kpi.seek(0)
 
       st.download_button(
-          label="📥 تحميل تقرير KPI نهائي (Excel)",
+          label="📥 تحميل تقرير KPI نهائي مدمج (Excel)",
           data=buffer_kpi,
           file_name=out_kpi_name,
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_ultimate_final_v5",
+          key="download_kpi_excel_optional_merge_v8",
       )
 
     except Exception as err:
