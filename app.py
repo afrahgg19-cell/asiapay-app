@@ -317,37 +317,46 @@ with tab3:
   st.info("قسم الإنجاز مرتبط ببيانات المقارنة.")
 
 # ====================================================
-# التبويب الرابع: KPI (مع إضافة عمود Organization E-Money Account المجموع حسب الشورت كود E)
+# التبويب الرابع: KPI (يقرأ الشيت الأول للحركات والشيت الثاني wallet report من نفس الملف)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "1. رفع ملف الحركات الأساسي.\n2. رفع ملف المندوبين (اختياري).\n3. رفع"
-      " ملف أو شيت **wallet report** لفلترة عمود H واستخراج المبالغ من عمود"
-      " R بناءً على شورت كود عمود E."
+      "ارفع **ملف الإكسل الرئيسي** (الذي يحتوي في شيتاته على الحركات وشيت"
+      " `wallet report` أو الشيت الثاني)، وملف المندوبين الاختياري."
   )
 
-  col_k1, col_k2, col_k3 = st.columns(3)
+  col_k1, col_k2 = st.columns(2)
   with col_k1:
     kpi_uploaded_file = st.file_uploader(
-        "ملف الإكسل الرئيسي للحركات (KPI)",
+        "ملف الإكسل الرئيسي (شيت الحركات + شيت wallet report)",
         type=["xlsx", "xls"],
-        key="kpi_main_v7",
+        key="kpi_main_single_file_v8",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
-        "ملف المندوبين (اختياري)", type=["xlsx", "xls"], key="kpi_rep_v7"
-    )
-  with col_k3:
-    wallet_report_file = st.file_uploader(
-        "ملف/شيت wallet report (للفلترة على H و R و E)",
+        "ملف المندوبين (اختياري - Short Code + اسم المندوب)",
         type=["xlsx", "xls"],
-        key="kpi_wallet_rep_v7",
+        key="kpi_rep_single_file_v8",
     )
 
   if kpi_uploaded_file is not None:
     try:
-      kpi_df = pd.read_excel(kpi_uploaded_file)
+      # قراءة جميع الشيتات من نفس الملف
+      excel_file_obj = pd.ExcelFile(kpi_uploaded_file)
+      sheet_names = excel_file_obj.sheet_names
+
+      # قراءة الشيت الأول للحركات
+      kpi_df = pd.read_excel(excel_file_obj, sheet_name=sheet_names[0])
+
+      # محاولة البحث عن شيت wallet report أو أخذ الشيت الثاني إنفوجد
+      wallet_report_sheet_name = None
+      for s_name in sheet_names:
+        if "wallet" in str(s_name).lower() or "report" in str(s_name).lower():
+          wallet_report_sheet_name = s_name
+          break
+      if not wallet_report_sheet_name and len(sheet_names) > 1:
+        wallet_report_sheet_name = sheet_names
 
       def get_col_exact(preferred_name, fallback_idx, df_target):
         if preferred_name in df_target.columns:
@@ -393,35 +402,36 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # معالجة wallet report واستخراج مجاميع Organization E-Money Account مطابقة لشورت كود عمود E
+      # معالجة شيت wallet report من نفس الملف الرئيسي
       e_money_map = {}
-      if wallet_report_file is not None:
+      if wallet_report_sheet_name:
         try:
-          w_rep_df = pd.read_excel(wallet_report_file)
-          # تحديد عمود H (الفهرس 7 أو الحرف H أو اسم مشابه) وعمود R (الفهرس 17) وعمود E (الفهرس 4)
+          w_rep_df = pd.read_excel(
+              excel_file_obj, sheet_name=wallet_report_sheet_name
+          )
+          # عمود H (الفهرس 7 أو الحرف H)، عمود R (الفهرس 17)، عمود E (الفهرس 4)
           h_col = (
               w_rep_df.columns[7]
               if len(w_rep_df.columns) > 7
               else (
-                  "H" if "H" in w_rep_df.columns else w_rep_df.columns[min(7, len(w_rep_df.columns)-1)]
+                  "H" if "H" in w_rep_df.columns else w_rep_df.columns[min(7, len(w_rep_df.columns) - 1)]
               )
           )
           r_col = (
               w_rep_df.columns[17]
               if len(w_rep_df.columns) > 17
               else (
-                  "R" if "R" in w_rep_df.columns else w_rep_df.columns[min(17, len(w_rep_df.columns)-1)]
+                  "R" if "R" in w_rep_df.columns else w_rep_df.columns[min(17, len(w_rep_df.columns) - 1)]
               )
           )
           e_col = (
               w_rep_df.columns[4]
               if len(w_rep_df.columns) > 4
               else (
-                  "E" if "E" in w_rep_df.columns else w_rep_df.columns[min(4, len(w_rep_df.columns)-1)]
+                  "E" if "E" in w_rep_df.columns else w_rep_df.columns[min(4, len(w_rep_df.columns) - 1)]
               )
           )
 
-          # فلترة عمود H على "Organization E-Money Account"
           filtered_w = w_rep_df[
               w_rep_df[h_col].astype(str).str.strip().str.lower()
               == "organization e-money account".lower()
@@ -443,9 +453,12 @@ with tab_kpi:
 
           grouped_e = filtered_w.groupby("e_code_clean")["clean_R"].sum()
           e_money_map = grouped_e.to_dict()
-          st.success("✅ تمت فلترة wallet report وحساب مبالغ Organization E-Money Account بنجاح.")
+          st.success(
+              f"✅ تم قراءة الفلترة لـ Organization E-Money Account من الشيت"
+              f" ({wallet_report_sheet_name}) بنجاح."
+          )
         except Exception as e_w:
-          st.warning(f"⚠️ تعذر تحليل ملف wallet report بالشكل المطلوب: {e_w}")
+          st.warning(f"⚠️ تعذر تحليل شيت wallet report: {e_w}")
 
       # ربط المندوبين
       has_rep_file = rep_uploaded_file is not None
@@ -507,7 +520,7 @@ with tab_kpi:
 
         row_item["Arabic Name (F)"] = f_v
 
-        # إضافة عمود Organization E-Money Account المفلتر ومحول بفواصل عشرية بناءً على الشورت كود
+        # إضافة عمود Organization E-Money Account المفلتر ومحول بفواصل عشرية بناءً على الشورت كود E مطابقة لـ G
         e_val_raw = e_money_map.get(str(g_v).strip(), 0.0)
         row_item["Organization E-Money Account (R-sum)"] = (
             f"{e_val_raw:,.2f}"
@@ -564,4 +577,4 @@ with tab_kpi:
     except Exception as err:
       st.error(f"⚠️ خطأ أثناء معالجة ملف الـ KPI: {err}")
   else:
-    st.info("📌 يرجى رفع ملف الإكسل الرئيسي للـ KPI على الأقل لعرض النتائج.")
+    st.info("📌 يرجى رفع ملف الإكسل الرئيسي لعرض النتائج.")
