@@ -105,7 +105,7 @@ if "perf_summary" not in st.session_state:
 
 
 # ====================================================
-# القسم الأول: محفظة ASIA PAY (بدون أصفار مزعجة في الحقول)
+# القسم الأول: محفظة ASIA PAY
 # ====================================================
 with tab1:
   st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
@@ -636,12 +636,12 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مع المندوبين + عمودي Done + عمود رصيد المحفظة المفلتر عمود H و R)
+# التبويب الرابع: KPI (محدث بحل مطابقة عمود R والكود)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة المفلتر")
   st.write(
-      "1. رفـع ملف الحركات الأساسي (KPI).\n2. رفـع ملف المندوبين (اختياري).\n3."
+      "1. رفع ملف الحركات الأساسي (KPI).\n2. رفع ملف المندوبين (اختياري).\n3."
       " رفع ملف المحفظة (Wallet) لاستخراج رصيد Organization E-Money"
       " Account."
   )
@@ -670,7 +670,7 @@ with tab_kpi:
     try:
       kpi_df = pd.read_excel(kpi_uploaded_file)
 
-      # --- قراءة shortCode من العمود E (الفهرس 4) أو بالاسم ---
+      # قراءة shortCode من العمود E (الفهرس 4) أو بالاسم
       g_col_name = None
       for col in kpi_df.columns:
         if str(col).strip().lower() in [
@@ -681,7 +681,7 @@ with tab_kpi:
           g_col_name = col
           break
       if not g_col_name and len(kpi_df.columns) > 4:
-        g_col_name = kpi_df.columns[4]  # العمود E (index 4)
+        g_col_name = kpi_df.columns
 
       def get_col_safe(preferred_name, fallback_idx, df_target):
         if preferred_name in df_target.columns:
@@ -697,7 +697,7 @@ with tab_kpi:
 
       work_kpi = pd.DataFrame()
       work_kpi["G_clean"] = (
-          kpi_df[g_col_name].astype(str).str.strip()
+          kpi_df[g_col_name].astype(str).str.strip().str.upper()
           if g_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
@@ -726,7 +726,7 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # --- ربط المندوبين إن توفر ---
+      # ربط المندوبين إن توفر
       has_rep_file = rep_uploaded_file is not None
       rep_map_dict = {}
       if has_rep_file:
@@ -756,31 +756,37 @@ with tab_kpi:
 
           if rep_code_col and rep_name_col:
             for _, rrow in rep_df.iterrows():
-              c_val = str(rrow[rep_code_col]).strip()
+              c_val = str(rrow[rep_code_col]).strip().upper()
               n_val = str(rrow[rep_name_col]).strip()
               rep_map_dict[c_val] = n_val
         except Exception:
           pass
 
-      # --- معالجة شيت المحفظة (فلترة عمود H على Organization E-Money Account وتنظيف عمود R) ---
+      # معالجة شيت المحفظة المحدث (فلترة عمود H + تنظيف عمود R + توحيد الأحرف للمطابقة)
       wallet_balance_map = {}
       if wallet_filtered_file is not None:
         try:
           w_df = pd.read_excel(wallet_filtered_file)
 
-          # عمود H (index 7 أو اسم accountType)
-          h_col_w = (
-              "accountType"
-              if "accountType" in w_df.columns
-              else (w_df.columns[7] if len(w_df.columns) > 7 else None)
-          )
-          # عمود R (index 17 أو اسم balance)
-          r_col_w = (
-              "balance"
-              if "balance" in w_df.columns
-              else (w_df.columns[17] if len(w_df.columns) > 17 else None)
-          )
-          # عمود الكود في المحفظة (العمود E index 4 أو مشابه)
+          # البحث الذكي عن عمود accountType (H أو بالاسم)
+          h_col_w = None
+          for col in w_df.columns:
+            if "accounttype" in str(col).lower():
+              h_col_w = col
+              break
+          if not h_col_w and len(w_df.columns) > 7:
+            h_col_w = w_df.columns[7]
+
+          # البحث الذكي عن عمود balance (R أو بالاسم)
+          r_col_w = None
+          for col in w_df.columns:
+            if "balance" in str(col).lower():
+              r_col_w = col
+              break
+          if not r_col_w and len(w_df.columns) > 17:
+            r_col_w = w_df.columns[17]
+
+          # البحث الذكي عن عمود shortCode في المحفظة
           w_code_col = None
           for col in w_df.columns:
             if str(col).strip().lower() in [
@@ -791,10 +797,9 @@ with tab_kpi:
               w_code_col = col
               break
           if not w_code_col and len(w_df.columns) > 4:
-            w_code_col = w_df.columns[4]
+            w_code_col = w_df.columns
 
           if h_col_w and r_col_w and w_code_col:
-            # فلترة H == 'Organization E-Money Account'
             mask_h = (
                 w_df[h_col_w].astype(str).str.strip()
                 == "Organization E-Money Account"
@@ -816,25 +821,24 @@ with tab_kpi:
                 num = float(s)
                 return -num if neg else num
               except ValueError:
-                return val  # بقاء النص نفسه إذا لم يكن رقماً
+                return val
 
             filtered_w["cleaned_R"] = filtered_w[r_col_w].apply(
                 clean_balance_val
             )
+            filtered_w["key_clean"] = (
+                filtered_w[w_code_col].astype(str).str.strip().str.upper()
+            )
 
-            # تجميع الأرقام أو أخذ القيم للـ shortCode
             num_mask = filtered_w["cleaned_R"].apply(
                 lambda x: isinstance(x, (int, float, np.number))
             )
-            num_grouped = (
+            wallet_balance_map = (
                 filtered_w[num_mask]
-                .groupby(filtered_w[w_code_col].astype(str).str.strip())[
-                    "cleaned_R"
-                ]
+                .groupby("key_clean")["cleaned_R"]
                 .sum()
                 .to_dict()
             )
-            wallet_balance_map = num_grouped
           st.success("✅ تمت معالجة ملف المحفظة وعمود R بنجاح.")
         except Exception as e_w:
           st.warning(f"⚠️ تحذير أثناء قراءة ملف المحفظة: {e_w}")
@@ -859,13 +863,13 @@ with tab_kpi:
         }
         if has_rep_file:
           row_item["اسم المندوب"] = rep_map_dict.get(
-              str(g_v).strip(), "غير محدد"
+              str(g_v).strip().upper(), "غير محدد"
           )
 
         row_item["Arabic Name (F)"] = f_v
 
-        # إضافة عمود رصيد المحفظة المستخرج من عمود R المفلتر
-        g_str_key = str(g_v).strip()
+        # إضافة عمود رصيد المحفظة المستخرج مع مطابقة آمنة
+        g_str_key = str(g_v).strip().upper()
         wallet_val = wallet_balance_map.get(g_str_key, "لا توجد مطابقة")
         row_item["رصيد المحفظة (عمود R المفلتر)"] = wallet_val
 
@@ -885,7 +889,6 @@ with tab_kpi:
         )
         row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
-        # عمود شروط B2B للـ 100 ألف والـ 3 مليون
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
         )
@@ -893,7 +896,6 @@ with tab_kpi:
             "Done" if total_b2b_sum > 2999000 else ""
         )
 
-        # شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done)
         high_t_count = int((grp["T_num"] > 4999).sum())
         row_item["عدد الحركات > 4999 (4+)"] = (
             "Done" if high_t_count >= 4 else ""
