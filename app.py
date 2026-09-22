@@ -1,4 +1,5 @@
-import re
+# --- فرضاَ لديك الـ tabs الرئيسية هكذا:
+# tab1, tab2, tab3, kpi_tab = st.tabs(["القسم الأول", "القسم الثاني", "القسم الثالث", "KPI"])
 
 with kpi_tab:
     st.header("📈 لوحة مؤشرات الأداء (KPI)")
@@ -11,7 +12,13 @@ with kpi_tab:
             # قراءة الإكسل المرفوع للـ KPI
             kpi_df = pd.read_excel(kpi_file)
             
+            # التأكد من وجود الأعمدة المطلوبة (H, F, B, T)
+            # ملاحظة: إذا الأعمدة عندك تأتي بأسماء عناوين صفحة أو حروف أعمدة صريحة
+            # سنفترض أن الأعمدة مسماة بالحروف أو تطابق الأسماء الفعليّة، سوينا معالجة مرنة:
             required_cols = ['H', 'F', 'B', 'T']
+            
+            # تحويل أسماء الأعمدة إلى حروف أو التأكد منها (لو الإكسل يحتوي عناوين عربية/إنجليزية، عدل حسب رغبتك، هنا نفترض الأعمدة H, F, B, T موجودة أو فهارس حروفية)
+            # لنفترض أن الأسماء حرفية أو يتم البحث عنها، سنعالج الآتي:
             missing_cols = [c for c in required_cols if c not in kpi_df.columns]
             
             if missing_cols:
@@ -19,18 +26,11 @@ with kpi_tab:
             else:
                 work_df = kpi_df.copy()
                 
-                # تنظيف ذكي وشامل لعمود T
-                def clean_t_value(val):
-                    if pd.isna(val):
-                        return 0.0
-                    s = str(val).replace(',', '').strip()
-                    match = re.search(r'[-+]?\d*\.?\d+', s)
-                    try:
-                        return float(match.group(0)) if match else 0.0
-                    except:
-                        return 0.0
-
-                work_df['T_num'] = work_df['T'].apply(clean_t_value)
+                # تنظيف وتحويل عمود T إلى رقم
+                work_df['T_num'] = pd.to_numeric(
+                    work_df['T'].astype(str).str.replace(',', '').str.strip(), 
+                    errors='coerce'
+                ).fillna(0)
                 
                 # تنظيف عمود B وعمود H و F
                 work_df['H_clean'] = work_df['H'].astype(str).str.strip()
@@ -51,8 +51,9 @@ with kpi_tab:
                     for op_type, count_val in b_counts.items():
                         row_data[f"عدد ({op_type})"] = count_val
                         
-                    # 2. حساب B2B باستخدام contains
-                    b2b_mask = group['B_clean'].str.contains('business to business transfer', case=False, na=False)
+                    # 2. باستثناء الـ Business to business transfer أو حساب الـ B2B كـ amount من T
+                    # استخراج مجموع amount من عمود T لعمليات Business to business transfer
+                    b2b_mask = group['B_clean'].str.lower() == 'business to business transfer'.lower()
                     b2b_amount = group.loc[b2b_mask, 'T_num'].sum()
                     row_data['مبلغ B2B (من T)'] = b2b_amount
                     
@@ -73,4 +74,5 @@ with kpi_tab:
                 )
                 
         except Exception as e:
-            st.error(f"حصل خطأ أثناء معالجة ملف KPI: {e}")
+            st.error(f حصل خطأ أثناء معالجة ملف KPI: {e}")
+صح
