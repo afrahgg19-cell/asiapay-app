@@ -4,49 +4,18 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
+# ====================================================
 # إعدادات الصفحة
+# ====================================================
 st.set_page_config(
     page_title="نظام إدارة المحفظة المالية الكبرى - ASIA PAY", layout="wide"
 )
 
-# --- لوحة التحكم في الأعلى ---
 st.markdown(
     "<h2 style='text-align: center; color: #1E3A8A;'>💰 نظام إدارة المحفظة"
     " المالية - ASIA PAY</h2>",
     unsafe_allow_html=True,
 )
-
-
-# دالة مساعدة لتنظيف أعمدة (تل المكتب / Short Code) فقط
-def clean_office_code_column(df_target):
-  if df_target is None or df_target.empty:
-    return df_target
-  df_clean = df_target.copy()
-  for col in df_clean.columns:
-    col_str_lower = str(col).lower()
-    # الاستهداف الدقيق لأعمدة التل أو الـ short code فقط
-    if (
-        "تل" in str(col)
-        or "short code" in col_str_lower
-        or "g_clean" in col_str_lower
-        or "code" in col_str_lower
-    ):
-      df_clean[col] = (
-          df_clean[col]
-          .astype(str)
-          .str.replace(r"\.0$", "", regex=True)
-          .replace({"nan": "", "NaN": "", "None": ""})
-      )
-  return df_clean
-
-
-# استخدام الـ Tabs (4 تبويبات)
-tab1, tab2, tab3, tab_kpi = st.tabs([
-    "💳 محفظة ASIA PAY",
-    "📊 المقارنة بين شهرين",
-    "⭐ نسبة الإنجاز",
-    "📈 KPI والأرصدة",
-])
 
 # --- قاعدة بيانات SQLite للمحفظة ---
 DB_FILE = "asia_pay_wallet.db"
@@ -72,6 +41,30 @@ def init_db():
 
 
 init_db()
+
+
+# ====================================================
+# دوال مساعدة عامة
+# ====================================================
+def clean_office_code_column(df_target):
+  if df_target is None or df_target.empty:
+    return df_target
+  df_clean = df_target.copy()
+  for col in df_clean.columns:
+    col_str_lower = str(col).lower()
+    if (
+        "تل" in str(col)
+        or "short code" in col_str_lower
+        or "g_clean" in col_str_lower
+        or "code" in col_str_lower
+    ):
+      df_clean[col] = (
+          df_clean[col]
+          .astype(str)
+          .str.replace(r"\.0$", "", regex=True)
+          .replace({"nan": "", "NaN": "", "None": ""})
+      )
+  return df_clean
 
 
 def load_wallet_from_db():
@@ -118,7 +111,16 @@ def get_latest_balance():
   return row[0] if row else 0.0
 
 
-# --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
+def get_col_safe(preferred_name, fallback_idx, df_target):
+  if preferred_name in df_target.columns:
+    return preferred_name
+  cols_local = [str(c).strip() for c in df_target.columns.tolist()]
+  if len(cols_local) > fallback_idx:
+    return df_target.columns[fallback_idx]
+  return df_target.columns[0] if len(cols_local) > 0 else None
+
+
+# --- تهيئة الحفظ المؤقت (Session State) ---
 if "pivot_result" not in st.session_state:
   st.session_state["pivot_result"] = None
 if "combined_df" not in st.session_state:
@@ -126,6 +128,15 @@ if "combined_df" not in st.session_state:
 if "perf_summary" not in st.session_state:
   st.session_state["perf_summary"] = None
 
+# ====================================================
+# استخدام الـ Tabs (4 تبويبات)
+# ====================================================
+tab1, tab2, tab3, tab_kpi = st.tabs([
+    "💳 محفظة ASIA PAY",
+    "📊 المقارنة بين شهرين",
+    "⭐ نسبة الإنجاز",
+    "📈 KPI والأرصدة",
+])
 
 # ====================================================
 # القسم الأول: محفظة ASIA PAY
@@ -685,14 +696,6 @@ with tab_kpi:
   if kpi_uploaded_file is not None:
     try:
       kpi_df = pd.read_excel(kpi_uploaded_file)
-
-      def get_col_safe(preferred_name, fallback_idx, df_target):
-        if preferred_name in df_target.columns:
-          return preferred_name
-        cols_local = [str(c).strip() for c in df_target.columns.tolist()]
-        if len(cols_local) > fallback_idx:
-          return df_target.columns[fallback_idx]
-        return df_target.columns[0] if len(cols_local) > 0 else None
 
       g_col_name = get_col_safe("Short Code", 6, kpi_df)
       f_col_name = get_col_safe("Arabic Name", 5, kpi_df)
