@@ -531,7 +531,7 @@ with tab2:
     df_to_save_pivot = st.session_state["pivot_result"].copy()
     if isinstance(df_to_save_pivot.columns, pd.MultiIndex):
       df_to_save_pivot.columns = [
-          "_".join([str(c) for c in col if c])
+          "_".join([str(c) for c in col if col != ""])
           for col in df_to_save_pivot.columns
       ]
 
@@ -635,12 +635,12 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مع ضمان إظهار جميع المندوبين/المكاتب Left/Outer Join + عمود رصيد المحفظة)
+# التبويب الرابع: KPI (دمج الحركات + الإكسل الاختياري + ورقة Wallet report)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "1. رفـع ملف الحركات الأساسي / ورقة المحفظة (إجباري).\n2. رفـع ملف المندوبين (إجباري/اختياري لدمج جميع المندوبين وعرضهم بالكامل)."
+      "1. رفـع ملف الإكسل الخاص بالحركات و Wallet report (إجباري).\n2. رفـع ملف المندوبين/الإكسل الاختياري لدمجه كلياً حسب الشورت كود."
   )
 
   col_k1, col_k2 = st.columns(2)
@@ -648,13 +648,13 @@ with tab_kpi:
     kpi_uploaded_file = st.file_uploader(
         "اختر ملف الإكسل الخاص بالحركات و Wallet report (KPI)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_final_v5",
+        key="kpi_main_file_final_v7",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
-        "اختر ملف المندوبين (Short Code + اسم المندوب)",
+        "اختر الإكسل الاختياري للمطوفة/المندوبين",
         type=["xlsx", "xls"],
-        key="kpi_rep_file_final_v5",
+        key="kpi_rep_file_final_v7",
     )
 
   if kpi_uploaded_file is not None:
@@ -721,7 +721,7 @@ with tab_kpi:
                 clean_balance_val
             )
             filtered_w["key_clean"] = (
-                filtered_w[e_col_w].astype(str).str.strip()
+                filtered_w[e_col_w].astype(str).str.strip().str.upper()
             )
             wallet_balance_map = (
                 filtered_w.groupby("key_clean")["cleaned_R"].sum().to_dict()
@@ -748,6 +748,7 @@ with tab_kpi:
           if g_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
+      work_kpi["G_upper_key"] = work_kpi["G_clean"].str.upper()
       work_kpi["F_clean"] = (
           kpi_df[f_col_name].astype(str).str.strip()
           if f_col_name in kpi_df.columns
@@ -773,59 +774,6 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # --- قراءة ملف المندوبين وبناء جدول مرجعي أساسي ---
-      master_reps = pd.DataFrame(
-          columns=["Short Code (G)", "اسم المندوب", "Arabic Name (F)"]
-      )
-      rep_map_dict = {}
-      rep_name_map = {}
-      has_rep_file = rep_uploaded_file is not None
-
-      if has_rep_file:
-        try:
-          rep_df = pd.read_excel(rep_uploaded_file)
-          rep_code_col, rep_name_col = None, None
-          for col in rep_df.columns:
-            c_low = str(col).lower()
-            if (
-                "short" in c_low
-                or "code" in c_low
-                or "كود" in str(col)
-                or "short code" in c_low
-            ):
-              rep_code_col = col
-            if (
-                "مندوب" in str(col)
-                or "representative" in c_low
-                or "rep" in c_low
-                or "اسم" in str(col)
-            ):
-              rep_name_col = col
-
-          if not rep_code_col and len(rep_df.columns) > 0:
-            rep_code_col = rep_df.columns[0]
-          if not rep_name_col and len(rep_df.columns) > 1:
-            rep_name_col = rep_df.columns
-
-          extracted_list = []
-          for _, rrow in rep_df.iterrows():
-            c_val = str(rrow[rep_code_col]).strip() if rep_code_col else ""
-            n_val = str(rrow[rep_name_col]).strip() if rep_name_col else ""
-            if c_val and c_val != "nan":
-              extracted_list.append({
-                  "Short Code (G)": c_val,
-                  "اسم المندوب": n_val,
-              })
-              rep_map_dict[c_val] = n_val
-
-          master_reps = pd.DataFrame(extracted_list)
-          st.success(
-              "✅ تم ربط ملف المندوبين وضمان ظهور كافة المندوبين بالتقرير."
-          )
-        except Exception as e_rep:
-          st.warning(f"⚠️ تعذر قراءة ملف المندوبين بالكامل: {e_rep}")
-          has_rep_file = False
-
       target_ops = [
           "Merchant Payment",
           "Airtime Top-up",
@@ -837,47 +785,77 @@ with tab_kpi:
           "Electronic Vouchers",
       ]
 
-      kpi_rows_list = []
-      # تجميع من ملف الـ KPI
       kpi_grouped = {}
       for (g_v, f_v), grp in work_kpi.groupby(
-          ["G_clean", "F_clean"], dropna=False
+          ["G_upper_key", "F_clean"], dropna=False
       ):
         g_str = str(g_v).strip()
         kpi_grouped[g_str] = (f_v, grp)
 
-      # دمج كل الشورت كودز الموجودة في المندوبين أو في الـ KPI لضمان الظهور الشامل
-      all_short_codes = set(master_reps["Short Code (G)"].astype(str)) | set(
-          kpi_grouped.keys()
-      )
+      all_short_codes = set(kpi_grouped.keys())
 
+      # --- قراءة الدمج من الإكسل الاختياري ---
+      opt_df = None
+      opt_join_col = None
+      if rep_uploaded_file is not None:
+        try:
+          opt_df = pd.read_excel(rep_uploaded_file)
+          for c in opt_df.columns:
+            c_low = str(c).lower()
+            if (
+                "short" in c_low
+                or "code" in c_low
+                or "كود" in str(c)
+                or "short_code" in c_low
+            ):
+              opt_join_col = c
+              break
+          if opt_join_col is None and len(opt_df.columns) > 0:
+            opt_join_col = opt_df.columns[0]
+
+          opt_df["_opt_key"] = (
+              opt_df[opt_join_col].astype(str).str.strip().str.upper()
+          )
+          all_short_codes = all_short_codes | set(
+              opt_df["_opt_key"].dropna().astype(str).tolist()
+          )
+        except Exception as e_opt:
+          st.warning(f"⚠️ ملاحظة قراءة الإكسل الاختياري: {e_opt}")
+          opt_df = None
+
+      # تجهيز قاموس البيانات الاختيارية لكل شورت كود
+      opt_data_map = {}
+      if opt_df is not None and "_opt_key" in opt_df.columns:
+        other_cols = [c for c in opt_df.columns if c != "_opt_key"]
+        for _, orow in opt_df.iterrows():
+          o_k = str(orow["_opt_key"]).strip()
+          if o_k and o_k != "NAN":
+            opt_data_map[o_k] = {c: orow[c] for c in other_cols}
+
+      kpi_rows_list = []
       for g_v in sorted(list(all_short_codes)):
         f_v = ""
-        rep_name = rep_map_dict.get(g_v, "غير محدد")
-
         if g_v in kpi_grouped:
           f_val_found, grp = kpi_grouped[g_v]
           f_v = f_val_found
         else:
-          # إذا لم يوجد في الـ KPI، ننشئ إطار وهمي صفري
           grp = pd.DataFrame(
               columns=["G_clean", "F_clean", "B_clean", "T_num"]
           )
 
         row_item = {
             "Short Code (G)": g_v,
+            "Arabic Name (F)": f_v,
         }
-        if has_rep_file or not master_reps.empty:
-          row_item["اسم المندوب"] = rep_name
 
-        row_item["Arabic Name (F)"] = f_v
+        # دمج أعمدة الإكسل الاختياري حسب الشورت كود
+        if g_v in opt_data_map:
+          row_item.update(opt_data_map[g_v])
 
         # --- إدراج رصيد المحفظة من Wallet report حسب الشورت كود ---
         w_bal = wallet_balance_map.get(str(g_v).strip(), 0.0)
         row_item["رصيد المحفظة"] = (
-            f"{w_bal:,.2f}"
-            if isinstance(w_bal, (int, float, pd.np.number if hasattr(pd, 'np') else float))
-            else w_bal
+            f"{w_bal:,.2f}" if isinstance(w_bal, (int, float)) else w_bal
         )
 
         for op in target_ops:
@@ -904,15 +882,12 @@ with tab_kpi:
         )
         row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
-        # --- إضافة عمودي شروط B2B للـ 100 ألف والـ 3 مليون ---
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
         )
         row_item["حركه ال3 مليون"] = (
             "Done" if total_b2b_sum > 2999000 else ""
         )
-
-        # --- شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done) ---
         row_item["عدد الحركات > 4999 (4+)"] = (
             "Done" if high_t_count >= 4 else ""
         )
@@ -920,16 +895,19 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI (الشامل للمندوبين ورصيد المحفظة)")
+      st.subheader(
+          "📋 نتيجة تقرير الـ KPI (دمج شامل للحركات + الإكسل الاختياري +"
+          " المحفظة)"
+      )
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = "KPI_Report_Complete_All_Reps.xlsx"
+      out_kpi_name = "KPI_Report_Complete_All_Merged.xlsx"
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
       if isinstance(df_to_save_kpi.columns, pd.MultiIndex):
         df_to_save_kpi.columns = [
-            "_".join([str(c) for c in col if c])
+            "_".join([str(c) for c in col if col != ""])
             for col in df_to_save_kpi.columns
         ]
 
@@ -938,13 +916,13 @@ with tab_kpi:
       buffer_kpi.seek(0)
 
       st.download_button(
-          label="📥 تحميل تقرير KPI نهائي شامل (Excel)",
+          label="📥 تحميل تقرير KPI نهائي مدمج وشامل (Excel)",
           data=buffer_kpi,
           file_name=out_kpi_name,
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_complete_all",
+          key="download_kpi_excel_full_merged",
       )
 
     except Exception as err:
