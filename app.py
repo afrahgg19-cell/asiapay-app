@@ -1,8 +1,6 @@
 from io import BytesIO
 import numpy as np
 import pandas as pd
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 import streamlit as st
 
 st.set_page_config(
@@ -21,6 +19,8 @@ tab1, tab2, tab3, tab_kpi = st.tabs([
     "⭐ نسبة الإنجاز",
     "📈 KPI",
 ])
+
+# يمكنك إبقاء الكود السابق للتبويب الأول والثاني والثالث كما هو، والتركيز على تبويب KPI المعدل أدناه:
 
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة")
@@ -47,8 +47,10 @@ with tab_kpi:
       sheet_names = excel_file_obj.sheet_names
       st.info(f"📁 الأوراق المكتشفة داخل الملف: {sheet_names}")
 
+      # تحديد ورقة الحركات (الورقة الأولى أو الافتراضية)
       kpi_df = pd.read_excel(kpi_uploaded_file, sheet_name=0)
 
+      # البحث عن ورقة Wallet report أو استخدام الورقة الثانية
       wallet_balance_map = {}
       wallet_sheet_name = None
       for s in sheet_names:
@@ -64,12 +66,14 @@ with tab_kpi:
             f"✅ يتم قراءة رصيد المحفظة من الورقة: '{wallet_sheet_name}'"
         )
 
+        # البحث عن أعمدة accountType (H تقريباً)، balance (R)، والشورت كود في العمود E
         h_col_w = next(
             (c for c in w_df.columns if "accounttype" in str(c).lower()), None
         )
         r_col_w = next(
             (c for c in w_df.columns if "balance" in str(c).lower()), None
         )
+        # العمود E هو غالباً الفهرس 4 (A=0, B=1, C=2, D=3, E=4) أو يبحث عن shortCode
         e_col_w = next(
             (
                 c
@@ -80,13 +84,13 @@ with tab_kpi:
             None,
         )
         if not e_col_w and len(w_df.columns) > 4:
-          e_col_w = w_df.columns
+          e_col_w = w_df.columns  # العمود الخامس E
         if not h_col_w and len(w_df.columns) > 7:
           h_col_w = w_df.columns
         if not r_col_w and len(w_df.columns) > 17:
           r_col_w = w_df.columns[17]
 
-        if h_col_w is not None and r_col_w is not None and e_col_w is not None:
+        if h_col_w and r_col_w and e_col_w:
           mask_h = (
               w_df[h_col_w].astype(str).str.strip()
               == "Organization E-Money Account"
@@ -120,15 +124,11 @@ with tab_kpi:
           wallet_balance_map = (
               filtered_w.groupby("key_clean")["cleaned_R"].sum().to_dict()
           )
-          st.success(
-              "✅ تمت مطابقة وتجميع أرصدة المحفظة حسب الشورت كود في العمود E"
-              " بنجاح!"
-          )
+          st.success("✅ تمت مطابقة وتجميع أرصدة المحفظة حسب الشورت كود في العمود E بنجاح!")
         else:
-          st.warning(
-              "⚠️ لم يتم العثور على أعمدة التطابق المطلوبة بدقة في ورقة المحفظة."
-          )
+          st.warning("⚠️ لم يتم العثور على أعمدة التطابق المطلوبة بدقة في ورقة المحفظة.")
 
+      # تجهيز أعمدة الحركات (الشورت كود في العمود E أو G حسب الملف، سنبحث عن العمود E أو shortCode)
       e_col_name = next(
           (
               c
@@ -139,7 +139,7 @@ with tab_kpi:
           None,
       )
       if not e_col_name and len(kpi_df.columns) > 4:
-        e_col_name = kpi_df.columns
+        e_col_name = kpi_df.columns  # العمود E افتراضياً
 
       f_col_name = next(
           (c for c in kpi_df.columns if "arabic name" in str(c).lower()), None
@@ -148,23 +148,13 @@ with tab_kpi:
         f_col_name = kpi_df.columns
 
       b_col_name = next(
-          (
-              c
-              for c in kpi_df.columns
-              if "type" in str(c).lower() and c != e_col_name
-          ),
-          None,
+          (c for c in kpi_df.columns if "type" in str(c).lower() and c != e_col_name), None
       )
       if not b_col_name and len(kpi_df.columns) > 1:
         b_col_name = kpi_df.columns
 
       t_col_name = next(
-          (
-              c
-              for c in kpi_df.columns
-              if "amount" in str(c).lower() or "t" == str(c).lower()
-          ),
-          None,
+          (c for c in kpi_df.columns if "amount" in str(c).lower() or "t" == str(c).lower()), None
       )
       if not t_col_name and len(kpi_df.columns) > 19:
         t_col_name = kpi_df.columns[19]
@@ -200,15 +190,14 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
+      # ربط المندوبين
       has_rep_file = rep_uploaded_file is not None
       rep_map_dict = {}
       if has_rep_file:
         try:
           rep_df = pd.read_excel(rep_uploaded_file)
           rep_code_col = rep_df.columns[0]
-          rep_name_col = (
-              rep_df.columns if len(rep_df.columns) > 1 else rep_df.columns[0]
-          )
+          rep_name_col = rep_df.columns if len(rep_df.columns) > 1 else rep_df.columns[0]
           for _, rrow in rep_df.iterrows():
             c_val = str(rrow[rep_code_col]).strip().upper()
             n_val = str(rrow[rep_name_col]).strip()
@@ -228,22 +217,17 @@ with tab_kpi:
       ]
 
       kpi_rows_list = []
-      for (e_v, f_v), grp in work_kpi.groupby(
-          ["E_clean", "F_clean"], dropna=False
-      ):
+      for (e_v, f_v), grp in work_kpi.groupby(["E_clean", "F_clean"], dropna=False):
         row_item = {"Short Code (E)": e_v}
         if has_rep_file:
-          row_item["اسم المندوب"] = rep_map_dict.get(
-              str(e_v).strip().upper(), "غير محدد"
-          )
+          row_item["اسم المندوب"] = rep_map_dict.get(str(e_v).strip().upper(), "غير محدد")
         row_item["Arabic Name (F)"] = f_v
 
         g_str_key = str(e_v).strip().upper()
+        # جلب الرصيد المطابق أو 0 بدلاً من النص الفارغ لكي تظهر الأرقام
         wallet_val = wallet_balance_map.get(g_str_key, 0.0)
         row_item["رصيد المحفظة"] = (
-            f"{wallet_val:,.2f}"
-            if isinstance(wallet_val, (int, float, np.number))
-            else wallet_val
+            f"{wallet_val:,.2f}" if isinstance(wallet_val, (int, float, np.number)) else wallet_val
         )
 
         for op in target_ops:
@@ -253,18 +237,14 @@ with tab_kpi:
         b2b_mask = grp["B_clean"].str.lower() == "business to business transfer"
         total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
         row_item["مجموع مبالغ B2B"] = (
-            f"{int(total_b2b_sum):,}"
-            if total_b2b_sum == int(total_b2b_sum)
-            else f"{total_b2b_sum:,.2f}"
+            f"{int(total_b2b_sum):,}" if total_b2b_sum == int(total_b2b_sum) else f"{total_b2b_sum:,.2f}"
         )
 
         row_item["حركه ال100 الف"] = "Done" if total_b2b_sum > 99000 else ""
         row_item["حركه ال3 مليون"] = "Done" if total_b2b_sum > 2999000 else ""
 
         high_t_count = int((grp["T_num"] > 4999).sum())
-        row_item["عدد الحركات > 4999 (4+)"] = (
-            "Done" if high_t_count >= 4 else ""
-        )
+        row_item["عدد الحركات > 4999 (4+)"] = "Done" if high_t_count >= 4 else ""
 
         kpi_rows_list.append(row_item)
 
@@ -272,72 +252,15 @@ with tab_kpi:
       st.subheader("📋 نتيجة تقرير الـ KPI النهائي")
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      # تصدير مع تطبيق التنسيق المطلوب (حجم الخط 14، حدود شباك، تلوين رصاصي وأبيض)
       buffer_kpi = BytesIO()
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
-        final_kpi_table.to_excel(writer, index=False, sheet_name="KPI_Report")
-        wb = writer.book
-        ws = wb["KPI_Report"]
-
-        # الأنماط المطلوبة
-        header_font = Font(
-            name="Calibri", size=14, bold=True, color="FFFFFF"
-        )
-        header_fill = PatternFill(
-            start_color="595959", end_color="595959", fill_type="solid"
-        )
-        font_size_14 = Font(name="Calibri", size=14, bold=False, color="000000")
-        light_gray_fill = PatternFill(
-            start_color="F2F2F2", end_color="F2F2F2", fill_type="solid"
-        )
-        white_fill = PatternFill(
-            start_color="FFFFFF", end_color="FFFFFF", fill_type="solid"
-        )
-
-        thin_border = Border(
-            left=Side(style="thin", color="D9D9D9"),
-            right=Side(style="thin", color="D9D9D9"),
-            top=Side(style="thin", color="D9D9D9"),
-            bottom=Side(style="thin", color="D9D9D9"),
-        )
-
-        for row_idx, row in enumerate(
-            ws.iter_rows(
-                min_row=1,
-                max_row=ws.max_row,
-                min_col=1,
-                max_col=ws.max_column,
-            ),
-            start=1,
-        ):
-          for cell in row:
-            cell.border = thin_border
-            if row_idx == 1:
-              cell.font = header_font
-              cell.fill = header_fill
-              cell.alignment = Alignment(
-                  horizontal="center", vertical="center", wrap_text=True
-              )
-            else:
-              cell.font = font_size_14
-              cell.fill = light_gray_fill if row_idx % 2 == 0 else white_fill
-              cell.alignment = Alignment(horizontal="right", vertical="center")
-
-        ws.row_dimensions.height = 32
-        for r in range(2, ws.max_row + 1):
-          ws.row_dimensions[r].height = 26
-
-        for col in ws.columns:
-          max_len = max(len(str(cell.value or "")) for cell in col)
-          col_letter = get_column_letter(col[0].column)
-          ws.column_dimensions[col_letter].width = max(max_len + 6, 16)
-
+        final_kpi_table.to_excel(writer, index=False)
       buffer_kpi.seek(0)
 
       st.download_button(
-          label="📥 تحميل تقرير KPI النهائي (Excel منسق)",
+          label="📥 تحميل تقرير KPI النهائي (Excel)",
           data=buffer_kpi,
-          file_name="KPI_Report_Formatted.xlsx",
+          file_name="KPI_Report_Fixed.xlsx",
           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       )
 
