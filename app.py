@@ -1,6 +1,9 @@
 from io import BytesIO
 import os
 import sqlite3
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 import pandas as pd
 import streamlit as st
 
@@ -8,6 +11,67 @@ import streamlit as st
 st.set_page_config(
     page_title="نظام إدارة المحفظة المالية الكبرى - ASIA PAY", layout="wide"
 )
+
+# --- دالة تطبيق تنسيق KPL (رمادي/رصاصي، حدود، خط 14) ---
+
+
+def apply_kpl_styling_to_sheet(ws):
+  """تطبيق تنسيق KPL رمادي/رصاصي مع حدود وخط 14 على الشيت"""
+  header_fill = PatternFill(
+      start_color='4A4A4A', end_color='4A4A4A', fill_type='solid'
+  )
+  header_font = Font(name='Calibri', size=14, bold=True, color='FFFFFF')
+
+  row_fill_white = PatternFill(
+      start_color='FFFFFF', end_color='FFFFFF', fill_type='solid'
+  )
+  row_fill_gray = PatternFill(
+      start_color='F5F5F5', end_color='F5F5F5', fill_type='solid'
+  )
+  cell_font = Font(name='Calibri', size=14, color='000000')
+
+  thin_side = Side(border_style='thin', color='D9D9D9')
+  dark_side = Side(border_style='medium', color='595959')
+  border_cell = Border(
+      left=thin_side, right=thin_side, top=thin_side, bottom=thin_side
+  )
+  border_header = Border(
+      left=thin_side, right=thin_side, top=dark_side, bottom=dark_side
+  )
+
+  max_row = ws.max_row
+  max_col = ws.max_column
+
+  for row_idx in range(1, max_row + 1):
+    is_header = row_idx == 1
+    current_row_fill = header_fill if is_header else (
+        row_fill_gray if row_idx % 2 == 0 else row_fill_white
+    )
+
+    for col_idx in range(1, max_col + 1):
+      cell = ws.cell(row=row_idx, column=col_idx)
+      cell.fill = current_row_fill
+      cell.border = border_header if is_header else border_cell
+
+      if is_header:
+        cell.font = header_font
+        cell.alignment = Alignment(
+            horizontal='center', vertical='center', wrap_text=True
+        )
+      else:
+        cell.font = cell_font
+        if isinstance(cell.value, (int, float)):
+          cell.alignment = Alignment(horizontal='right', vertical='center')
+        else:
+          cell.alignment = Alignment(horizontal='left', vertical='center')
+
+  for col in ws.columns:
+    max_len = max(len(str(cell.value or '')) for cell in col)
+    col_letter = get_column_letter(col[0].column)
+    ws.column_dimensions[col_letter].width = max(max_len + 5, 14)
+
+  ws.freeze_panes = 'A2'
+
 
 # --- لوحة التحكم في الأعلى ---
 st.markdown(
@@ -536,7 +600,14 @@ with tab2:
       ]
 
     with pd.ExcelWriter(buffer_pivot, engine="openpyxl") as writer:
-      df_to_save_pivot.to_excel(writer, index=False)
+      df_to_save_pivot.to_excel(writer, index=False, sheet_name="Comparison")
+
+    # تطبيق تنسيق KPL على ملف البايفوت
+    buffer_pivot.seek(0)
+    wb_p = openpyxl.load_workbook(buffer_pivot)
+    apply_kpl_styling_to_sheet(wb_p.active)
+    buffer_pivot = BytesIO()
+    wb_p.save(buffer_pivot)
     buffer_pivot.seek(0)
 
     st.download_button(
@@ -606,7 +677,7 @@ with tab3:
         elif amt > 2000000:
           perf_desc = "جيد جداً (85%)"
           points = int(amt / 10000)
-        elif amt > 500000:
+        elif amt > 500050:
           perf_desc = "جيد (75%)"
           points = int(amt / 10000)
         else:
@@ -823,7 +894,6 @@ with tab_kpi:
           st.warning(f"⚠️ ملاحظة قراءة الإكسل الاختياري: {e_opt}")
           opt_df = None
 
-      # تجهيز قاموس البيانات الاختيارية لكل شورت كود
       opt_data_map = {}
       if opt_df is not None and "_opt_key" in opt_df.columns:
         other_cols = [c for c in opt_df.columns if c != "_opt_key"]
@@ -848,11 +918,9 @@ with tab_kpi:
             "Arabic Name (F)": f_v,
         }
 
-        # دمج أعمدة الإكسل الاختياري حسب الشورت كود
         if g_v in opt_data_map:
           row_item.update(opt_data_map[g_v])
 
-        # --- إدراج رصيد المحفظة من Wallet report حسب الشورت كود ---
         w_bal = wallet_balance_map.get(str(g_v).strip(), 0.0)
         row_item["رصيد المحفظة"] = (
             f"{w_bal:,.2f}" if isinstance(w_bal, (int, float)) else w_bal
@@ -912,7 +980,14 @@ with tab_kpi:
         ]
 
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
-        df_to_save_kpi.to_excel(writer, index=False)
+        df_to_save_kpi.to_excel(writer, index=False, sheet_name="KPI_Report")
+
+      # تطبيق تنسيق KPL على تقرير الـ KPI النهائي
+      buffer_kpi.seek(0)
+      wb_k = openpyxl.load_workbook(buffer_kpi)
+      apply_kpl_styling_to_sheet(wb_k.active)
+      buffer_kpi = BytesIO()
+      wb_k.save(buffer_kpi)
       buffer_kpi.seek(0)
 
       st.download_button(
