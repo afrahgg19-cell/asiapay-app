@@ -1,114 +1,261 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 # إعداد الصفحة
-st.set_page_config(page_title="تطبيق التحدارة والأداء و KPI", layout="wide")
+st.set_page_config(
+    page_title="تحليل العمليات والجرد", page_layout="wide", initial_sidebar_state="expanded"
+)
 
-st.title("📊 نظام إدارة التقارير والجرد ومؤشرات الأداء")
+st.title("📊 نظام تحليل ومقارنة الجرد والعمليات")
 
-# --- تعريف التبويبات (الأقسام القديمة + تبويب KPI الجديد) ---
+# إنشاء التبويبات (أضفنا تبويب KPI هنا)
 tab1, tab2, tab3, tab_kpi = st.tabs([
-    "القسم الأول (إدارة البيانات)", 
-    "📊 الجرد الكلي ومقارنة الشهور", 
-    "⭐ نسب الأداء", 
+    "📁 رفع وتحليل البيانات العامة", 
+    "🔢 أعداد العمليات لكل Short Code", 
+    "📈 مقارنة الشهور",
     "KPI"
 ])
 
-# ==========================================
-# 1. القسم الأول (نصياً كما هو / ضع كودك القديم هنا)
-# ==========================================
+# ====================================================
+# التبويب الأول: رفع وتحليل البيانات العامة
+# ====================================================
 with tab1:
-    st.header("القسم الأول")
-    st.info("ضع محتوى القسم الأول القديم هنا نصاً بدون تعديل.")
-    # مثال هيكلي قد يكون موجود لديك:
-    # uploaded_file_1 = st.file_uploader("رفع ملف القسم الأول...", type=["xlsx", "csv"], key="file1")
+  st.subheader("📁 رفع ملفات البيانات الأساسية")
+  uploaded_file_general = st.file_uploader(
+      "اختر ملف الإكسل الرئيسي", type=["xlsx", "xls"], key="general_file"
+  )
+  if uploaded_file_general is not None:
+    df_gen = pd.read_excel(uploaded_file_general)
+    st.write("معاينة البيانات العامة:")
+    st.dataframe(df_gen.head(), use_container_width=True)
 
-# ==========================================
-# 2. القسم الثاني (📊 الجرد الكلي ومقارنة الشهور)
-# ==========================================
+# ====================================================
+# التبويب الثاني: عدد العمليات لكل Short Code + عمود T
+# ====================================================
 with tab2:
-    st.header("📊 الجرد الكلي ومقارنة الشهور")
-    st.info("ضع محتوى القسم الثاني القديم هنا نصاً بدون تعديل.")
-    # مثال: استرجاع من session_state إن وجد أو وضع المنطق القديم
-    if "pivot_result" in st.session_state:
-        st.write(st.session_state["pivot_result"])
+  st.markdown("### 🔢 إحصائيات عدد العمليات لكل Short Code")
+  st.write(
+      "يتم عرض عدد العمليات لكل مكتب (Short Code) مع الاسم العربي (عمود F),"
+      " مع تحويل مبالغ العمود (T) إلى أرقام حقيقية."
+  )
 
-# ==========================================
-# 3. القسم الثالث (⭐ نسب الأداء)
-# ==========================================
+  uploaded_file_ops = st.file_uploader(
+      "اختر ملف الإكسل الخاص بالعمليات (يحوي Short Code, Arabic Name, Reason"
+      " وعمود T)",
+      type=["xlsx", "xls"],
+      key="file_ops_count",
+  )
+
+  if uploaded_file_ops is not None:
+    try:
+      df_ops = pd.read_excel(uploaded_file_ops)
+      cols = df_ops.columns.tolist()
+
+      code_col = (
+          "Short Code"
+          if "Short Code" in df_ops.columns
+          else (cols[7] if len(cols) > 7 else cols[0])
+      )
+      name_col = (
+          "Arabic Name"
+          if "Arabic Name" in df_ops.columns
+          else (cols[5] if len(cols) > 5 else cols[0])
+      )
+      reason_col = (
+          "Reason 1"
+          if "Reason 1" in df_ops.columns
+          else ("Reason" if "Reason" in df_ops.columns else (cols if len(cols) > 2 else cols[0]))
+      )
+
+      t_col_idx = 19
+      t_col = (
+          cols[t_col_idx]
+          if len(cols) > t_col_idx
+          else next(
+              (c for c in cols if "t" in str(c).lower() or "amount" in str(c).lower()),
+              cols,
+          )
+      )
+
+      if t_col in df_ops.columns:
+        df_ops["Cleaned_T_Amount"] = (
+            df_ops[t_col]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace(" ", "", regex=False)
+            .str.strip()
+            .apply(
+                lambda x: float(x)
+                if x.replace(".", "", 1).replace("-", "", 1).isdigit()
+                else 0.0
+            )
+        )
+      else:
+        df_ops["Cleaned_T_Amount"] = 0.0
+
+      mapping_names = (
+          df_ops.groupby(code_col)[name_col].first().to_dict()
+          if code_col in df_ops.columns and name_col in df_ops.columns
+          else {}
+      )
+      df_ops["الاسم_العربي_الموحد"] = df_ops[code_col].map(mapping_names)
+
+      unique_reasons = (
+          df_ops[reason_col].dropna().unique().tolist()
+          if reason_col in df_ops.columns
+          else []
+      )
+      excluded_reasons = st.multiselect(
+          "اختر أنواع العمليات المراد استثناؤها (إن وجدت):",
+          options=unique_reasons,
+          default=[],
+          key="exclude_reason_tab2"
+      )
+
+      if excluded_reasons:
+        df_ops = df_ops[~df_ops[reason_col].isin(excluded_reasons)]
+
+      if code_col in df_ops.columns and reason_col in df_ops.columns:
+        ops_count_summary = (
+            df_ops.groupby([code_col, "الاسم_العربي_الموحد", reason_col])
+            .size()
+            .reset_index(name="عدد_العمليات")
+        )
+
+        pivot_ops_count = ops_count_summary.pivot_table(
+            index=[code_col, "الاسم_العربي_الموحد"],
+            columns=reason_col,
+            values="عدد_العمليات",
+            aggfunc="sum",
+            fill_value=0,
+        ).reset_index()
+
+        st.subheader("📋 جدول أعداد العمليات لكل Short Code حسب النوع")
+        st.dataframe(pivot_ops_count, use_container_width=True)
+
+        t_sum_summary = (
+            df_ops.groupby([code_col, "الاسم_العربي_الموحد"])[
+                "Cleaned_T_Amount"
+            ]
+            .sum()
+            .reset_index(name="إجمالي_مبالغ_عمود_T_الرقمي")
+        )
+
+        final_merged = pd.merge(
+            pivot_ops_count,
+            t_sum_summary,
+            on=[code_col, "الاسم_العربي_الموحد"],
+            how="left",
+        )
+        st.subheader("💰 أعداد العمليات مع مجاميع مبالغ عمود T المحولة لأرقام")
+        st.dataframe(final_merged, use_container_width=True)
+
+        out_file = "Operations_Count_Report.xlsx"
+        final_merged.to_excel(out_file, index=False)
+        with open(out_file, "rb") as f:
+          st.download_button(
+              "📥 تحميل تقرير أعداد العمليات (Excel)",
+              data=f,
+              file_name=out_file,
+              mime=(
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              ),
+              key="download_tab2"
+          )
+      else:
+        st.error("لم يتم العثور على أعمدة Short Code أو Reason المطلوبة بدقة.")
+
+    except Exception as e:
+      st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
+
+# ====================================================
+# التبويب الثالث: مقارنة الشهور
+# ====================================================
 with tab3:
-    st.header("⭐ نسب الأداء")
-    st.info("ضع محتوى القسم الثالث القديم هنا نصاً بدون تعديل.")
-    if "perf_summary" in st.session_state:
-        st.write(st.session_state["perf_summary"])
+  st.subheader("📈 مقارنة الشهور والجرد الكلي")
+  st.write("مقارنة البيانات بين الشهور المختلفة...")
 
-# ==========================================
-# 4. تبويب الـ KPI الجديد (حسب الطلب تماماً)
-# ==========================================
+# ====================================================
+# التبويب الجديد: KPI (حسب طلبك تماماً)
+# ====================================================
 with tab_kpi:
-    st.header("📈 لوحة مؤشرات الأداء (KPI)")
-    st.markdown("ارفع ملف الإكسل (يجب أن يحتوي أعمدة **H** كـ short code، **F** للأسماء بالعربي، **B** لنوع العمليات، **T** للمبالغ).")
-    
-    kpi_file = st.file_uploader("اختر ملف إكسل للـ KPI...", type=["xlsx", "xls"], key="kpi_main_uploader")
-    
-    if kpi_file is not None:
-        try:
-            kpi_df = pd.read_excel(kpi_file)
-            
-            required_cols = ['H', 'F', 'B', 'T']
-            missing_cols = [c for c in required_cols if c not in kpi_df.columns]
-            
-            if missing_cols:
-                st.error(f"❌ الأعمدة التالية مفقودة في الملف المرفق: {missing_cols}. تأكد من تسمية الأعمدة بحروف H, F, B, T.")
-            else:
-                work_df = kpi_df.copy()
-                
-                # تحويل عمود T إلى نمبر (رقم) بعد تنظيف النصوص والفواصل
-                work_df['T_num'] = pd.to_numeric(
-                    work_df['T'].astype(str).str.replace(',', '').str.strip(), 
-                    errors='coerce'
-                ).fillna(0)
-                
-                # تنظيف النصوص للأعمدة الأساسية
-                work_df['H_clean'] = work_df['H'].astype(str).str.strip()
-                work_df['F_clean'] = work_df['F'].astype(str).str.strip()
-                work_df['B_clean'] = work_df['B'].astype(str).str.strip()
-                
-                kpi_results = []
-                
-                # تجميع حسب H و F
-                for (h_val, f_val), group in work_df.groupby(['H_clean', 'F_clean'], dropna=False):
-                    row_data = {
-                        'Short Code (H)': h_val,
-                        'الاسم بالعربي (F)': f_val
-                    }
-                    
-                    # عدد مرات كل عملية من عمود B (عدد وليس مبلغ)
-                    b_counts = group['B_clean'].value_counts()
-                    for op_type, count_val in b_counts.items():
-                        row_data[f"عدد ({op_type})"] = count_val
-                        
-                    # باستثناء/استخراج الـ Business to business transfer كمبلغ من عمود T
-                    b2b_mask = group['B_clean'].str.lower() == 'business to business transfer'.lower()
-                    b2b_amount_t = group.loc[b2b_mask, 'T_num'].sum()
-                    row_data['مبلغ B2B (من T)'] = b2b_amount_t
-                    
-                    kpi_results.append(row_data)
-                
-                # بناء الجدول النهائي وتعويض الفراغات بأصفار
-                kpi_summary_df = pd.DataFrame(kpi_results).fillna(0)
-                
-                st.subheader("📋 نتيجة تجميع الـ KPI")
-                st.dataframe(kpi_summary_df, use_container_width=True)
-                
-                # زر تحميل النتائج
-                csv_export = kpi_summary_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 تحميل تقرير KPI نهائي (CSV)",
-                    data=csv_export,
-                    file_name="kpi_summary_report.csv",
-                    mime="text/csv"
-                )
-                
-        except Exception as e:
-            st.error(f"حدث خطأ أثناء معالجة ملف الـ KPI: {e}")
+  st.subheader("📈 لوحة مؤشرات الأداء (KPI)")
+  st.write("تجميع حسب H (Short Code) و F (الاسم العربي)، عدد عمليات عمود B، ومبلغ B2B من عمود T كأرقام.")
+
+  kpi_file = st.file_uploader(
+      "اختر ملف الإكسل الخاص بـ KPI (يحتوي H, F, B, T)",
+      type=["xlsx", "xls"],
+      key="kpi_file_uploader",
+  )
+
+  if kpi_file is not None:
+    try:
+      kpi_df = pd.read_excel(kpi_file)
+      kpi_cols = kpi_df.columns.tolist()
+
+      # تحديد الأعمدة H (Short Code), F (Arabic Name), B (Reason/Operation), T (Amount index 19 or col 'T')
+      h_col = 'H' if 'H' in kpi_df.columns else (kpi_cols[7] if len(kpi_cols) > 7 else kpi_cols[0])
+      f_col = 'F' if 'F' in kpi_df.columns else (kpi_cols[5] if len(kpi_cols) > 5 else kpi_cols[0])
+      b_col = 'B' if 'B' in kpi_df.columns else (kpi_cols if len(kpi_cols) > 1 else kpi_cols[0])
+      t_idx = 19
+      t_col = kpi_cols[t_idx] if len(kpi_cols) > t_idx else next((c for c in kpi_cols if str(c).upper() == 'T'), kpi_cols[-1])
+
+      work_df = kpi_df.copy()
+
+      # تحويل عمود T إلى رقم (Number)
+      if t_col in work_df.columns:
+        work_df['T_num'] = (
+            work_df[t_col]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace(" ", "", regex=False)
+            .str.strip()
+            .apply(
+                lambda x: float(x)
+                if x.replace(".", "", 1).replace("-", "", 1).isdigit()
+                else 0.0
+            )
+        )
+      else:
+        work_df['T_num'] = 0.0
+
+      work_df['H_clean'] = work_df[h_col].astype(str).str.strip()
+      work_df['F_clean'] = work_df[f_col].astype(str).str.strip()
+      work_df['B_clean'] = work_df[b_col].astype(str).str.strip()
+
+      kpi_rows = []
+      for (h_val, f_val), group in work_df.groupby(['H_clean', 'F_clean'], dropna=False):
+        row_data = {
+            'Short Code (H)': h_val,
+            'الاسم بالعربي (F)': f_val,
+        }
+        
+        # 1. عدد مرات كل نوع عملية في عمود B (عدد وليس مبلغ)
+        b_counts = group['B_clean'].value_counts()
+        for op_type, count_val in b_counts.items():
+          row_data[f"عدد ({op_type})"] = count_val
+
+        # 2. استخراج مبلغ business to business transfer من عمود T
+        b2b_mask = group['B_clean'].str.lower() == 'business to business transfer'.lower()
+        row_data['مبلغ_B2B_من_T'] = group.loc[b2b_mask, 'T_num'].sum()
+
+        kpi_rows.append(row_data)
+
+      kpi_summary_df = pd.DataFrame(kpi_rows).fillna(0)
+      st.subheader("📋 جدول نتائج KPI (أعداد عمليات B ومبالغ B2B من T)")
+      st.dataframe(kpi_summary_df, use_container_width=True)
+
+      # تصدير KPI
+      out_kpi_file = "KPI_Summary_Report.xlsx"
+      kpi_summary_df.to_excel(out_kpi_file, index=False)
+      with open(out_kpi_file, "rb") as f:
+        st.download_button(
+            "📥 تحميل تقرير KPI (Excel)",
+            data=f,
+            file_name=out_kpi_file,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_kpi"
+        )
+
+    except Exception as e:
+      st.error(f"حدث خطأ أثناء معالجة ملف KPI: {e}")
