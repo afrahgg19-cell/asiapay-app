@@ -472,8 +472,6 @@ with tab2:
       reason_col = (
           "Reason Type"
           if "Reason Type" in combined_df.columns
-          else combined_df.columns
-          if len(combined_df.columns) > 2
           else combined_df.columns[0]
       )
       combined_df["Arabic Translation"] = combined_df[reason_col].apply(
@@ -483,15 +481,23 @@ with tab2:
       code_col = (
           "Short Code"
           if "Short Code" in combined_df.columns
-          else combined_df.columns[0]
+          else (
+              "G"
+              if "G" in combined_df.columns
+              else combined_df.columns[0]
+          )
       )
       name_col = (
           "Arabic Name"
           if "Arabic Name" in combined_df.columns
           else (
-              combined_df.columns
-              if len(combined_df.columns) > 1
-              else combined_df.columns[0]
+              "F"
+              if "F" in combined_df.columns
+              else (
+                  combined_df.columns
+                  if len(combined_df.columns) > 1
+                  else combined_df.columns[0]
+              )
           )
       )
 
@@ -560,15 +566,23 @@ with tab3:
     code_col = (
         "Short Code"
         if "Short Code" in df_combined.columns
-        else df_combined.columns[0]
+        else (
+            "G"
+            if "G" in df_combined.columns
+            else df_combined.columns[0]
+        )
     )
     name_col = (
         "Arabic Name"
         if "Arabic Name" in df_combined.columns
         else (
-            df_combined.columns
-            if len(df_combined.columns) > 1
-            else df_combined.columns[0]
+            "F"
+            if "F" in df_combined.columns
+            else (
+                df_combined.columns
+                if len(df_combined.columns) > 1
+                else df_combined.columns[0]
+            )
         )
     )
 
@@ -623,19 +637,19 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (عمود H للكود، F للاسم، أعداد العمليات من C، و B2B تحويل من T إلى أرقام)
+# التبويب الرابع: KPI (عمود G للشورت كود، F للاسم بالعربي، العمليات المحددة من B، ومبالغ B2B نصوص من T)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "تجميع Short Code (عمود H)، الاسم بالعربي (عمود F)، عد العمليات"
-      " من عمود C، واستخراج وتحويل مبالغ business to business transfer من عمود T إلى أرقام."
+      "Short Code (عمود G)، الاسم بالعربي (عمود F)، عد العمليات المحددة من"
+      " العمود B، ונصوص Business to Business Transfer من العمود T."
   )
 
   kpi_uploaded_file = st.file_uploader(
       "اختر ملف الإكسل الخاص بـ KPI",
       type=["xlsx", "xls"],
-      key="kpi_tab_uploader",
+      key="kpi_tab_uploader_exact",
   )
 
   if kpi_uploaded_file is not None:
@@ -643,90 +657,81 @@ with tab_kpi:
       kpi_df = pd.read_excel(kpi_uploaded_file)
       cols_list = kpi_df.columns.tolist()
 
-      h_idx = 7 if len(cols_list) > 7 else 0
-      f_idx = 5 if len(cols_list) > 5 else 0
-      c_idx = 2 if len(cols_list) > 2 else 0
-      t_idx = 19 if len(cols_list) > 19 else (len(cols_list) - 1)
+      # مطابقة الأعمدة حسب فكرتك (G للشورت كود، F للاسم العربي، B للعمليات، T للمبالغ النصية)
+      g_col_name = "Short Code" if "Short Code" in cols_list else ("G" if "G" in cols_list else (cols_list if len(cols_list) > 6 else cols_list[0]))
+      f_col_name = "Arabic Name" if "Arabic Name" in cols_list else ("F" if "F" in cols_list else (cols_list if len(cols_list) > 5 else cols_list[0]))
+      b_col_name = "B" if "B" in cols_list else (cols_list if len(cols_list) > 1 else cols_list[0])
+      t_col_name = "T" if "T" in cols_list else (cols_list[19] if len(cols_list) > 19 else cols_list[-1])
 
       work_kpi = pd.DataFrame()
-      work_kpi["H_clean"] = (
-          kpi_df["H"].astype(str).str.strip()
-          if "H" in kpi_df.columns
-          else kpi_df.iloc[:, h_idx].astype(str).str.strip()
+      work_kpi["G_clean"] = (
+          kpi_df[g_col_name].astype(str).str.strip()
+          if g_col_name in kpi_df.columns
+          else pd.Series([""] * len(kpi_df))
       )
       work_kpi["F_clean"] = (
-          kpi_df["Arabic Name"].astype(str).str.strip()
-          if "Arabic Name" in kpi_df.columns
-          else (
-              kpi_df["F"].astype(str).str.strip()
-              if "F" in kpi_df.columns
-              else kpi_df.iloc[:, f_idx].astype(str).str.strip()
-          )
+          kpi_df[f_col_name].astype(str).str.strip()
+          if f_col_name in kpi_df.columns
+          else pd.Series([""] * len(kpi_df))
       )
-      work_kpi["C_clean"] = (
-          kpi_df["C"].astype(str).str.strip()
-          if "C" in kpi_df.columns
-          else kpi_df.iloc[:, c_idx].astype(str).str.strip()
+      work_kpi["B_clean"] = (
+          kpi_df[b_col_name].astype(str).str.strip()
+          if b_col_name in kpi_df.columns
+          else pd.Series([""] * len(kpi_df))
+      )
+      work_kpi["T_text"] = (
+          kpi_df[t_col_name].astype(str).str.strip()
+          if t_col_name in kpi_df.columns
+          else pd.Series([""] * len(kpi_df))
       )
 
-      raw_t_series = (
-          kpi_df["T"].astype(str)
-          if "T" in kpi_df.columns
-          else kpi_df.iloc[:, t_idx].astype(str)
-      )
-      work_kpi["T_text"] = raw_t_series.str.strip()
-
-      cleaned_t_numeric = (
-          work_kpi["T_text"]
-          .str.replace(",", "", regex=False)
-          .str.replace(" ", "", regex=False)
-      )
-      work_kpi["T_num"] = pd.to_numeric(
-          cleaned_t_numeric, errors="coerce"
-      ).fillna(0.0)
+      target_ops = [
+          "Merchant Payment",
+          "Airtime Top-up",
+          "Cash In",
+          "Cash Out",
+          "Bulk B2B Transfer",
+          "Super Transaction",
+          "E-money Deposit",
+          "Electronic Vouchers",
+      ]
 
       kpi_rows_list = []
-      for (h_v, f_v), grp in work_kpi.groupby(
-          ["H_clean", "F_clean"], dropna=False
+      for (g_v, f_v), grp in work_kpi.groupby(
+          ["G_clean", "F_clean"], dropna=False
       ):
         row_item = {
-            "Short Code (H)": h_v,
+            "Short Code (G)": g_v,
             "Arabic Name (F)": f_v,
         }
 
-        c_value_counts = grp["C_clean"].value_counts()
-        for op_name, op_count in c_value_counts.items():
-          col_key = f"عدد ({op_name})"
-          if col_key not in row_item:
-            row_item[col_key] = 0
-          row_item[col_key] += op_count
+        # عد العمليات المحددة فقط من العمود B
+        for op in target_ops:
+          count_val = grp["B_clean"].str.lower() == op.lower()
+          row_item[f"عدد ({op})"] = int(count_val.sum())
 
+        # عملية Business to Business Transfer من العمود T (نصوص)
         b2b_mask = (
-            grp["C_clean"]
-            .str.lower()
-            .str.contains("business to business transfer", na=False)
+            grp["B_clean"].str.lower() == "business to business transfer"
         )
-
-        b2b_total_num = grp.loc[b2b_mask, "T_num"].sum()
-
         b2b_texts = [
             t
             for t in grp.loc[b2b_mask, "T_text"].tolist()
-            if str(t).lower() not in ["nan", "none", "", "nat"]
+            if str(t).lower() not in ["nan", "none", "", "nat", "np.nan"]
         ]
 
-        row_item["مجموع مبالغ B2B (رقمي محول من T)"] = b2b_total_num
-        row_item["نصوص B2B الأصلية (T)"] = (
-            " | ".join(b2b_texts) if b2b_texts else "لا يوجد"
+        # وضع النصوص كما هي (بدون تحويل أرقام)
+        row_item["مبالغ Business to Business Transfer (نصوص من T)"] = (
+            " | ".join(b2b_texts) if b2b_texts else "لا توجد"
         )
 
         kpi_rows_list.append(row_item)
 
-      final_kpi_table = pd.DataFrame(kpi_rows_list).fillna(0)
-      st.subheader("📋 نتيجة تقرير الـ KPI")
+      final_kpi_table = pd.DataFrame(kpi_rows_list)
+      st.subheader("📋 نتيجة تقرير الـ KPI المخصص")
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = "KPI_Report_Summary.xlsx"
+      out_kpi_name = "KPI_Report_Summary_Exact.xlsx"
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
@@ -747,10 +752,10 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel",
+          key="download_kpi_excel_exact",
       )
 
     except Exception as err:
       st.error(f"⚠️ خطأ أثناء معالجة ملف الـ KPI: {err}")
   else:
-    st.info("📌 يرجى رفع ملف الإكسل الخاص بالـ KPI لعرض التجميعات المطلوبة.")
+    st.info("📌 يرجى رفع ملف الإكسل الخاص بـ KPI.")
