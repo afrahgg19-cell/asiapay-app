@@ -617,4 +617,4 @@ with tab_kpi:
 
   if kpi_uploaded_file is not None:
     try:
-      # --- 1. استخرج وتجميع أرصدة المحفظة من شيت wallet report ---
+      # --- 1. استخراج وتجميع أرصدة المحفظة من شيت wallet report ---
