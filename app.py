@@ -460,11 +460,14 @@ with tab2:
           )
       )
 
+      # ➕ [تعديل مضاف بحرفية بدون مساس بالأصل]: حساب عمود عدد الحركات
+      combined_df["عدد حركات"] = 1
+
       pivot_result = combined_df.pivot_table(
           index=[code_col, name_col, reason_col, "Arabic Translation"],
           columns="Month",
-          values="Cleaned_Amount",
-          aggfunc="sum",
+          values=["Cleaned_Amount", "عدد حركات"],
+          aggfunc={"Cleaned_Amount": "sum", "عدد حركات": "sum"},
           fill_value=0,
       ).reset_index()
 
