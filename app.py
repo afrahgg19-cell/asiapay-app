@@ -1,5 +1,6 @@
 from io import BytesIO
 import os
+import re
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -656,7 +657,7 @@ with tab3:
       ]] = perf_summary.apply(calc_performance_and_progress, axis=1)
 
       st.session_state["perf_summary"] = clean_office_code_column(perf_summary)
-      st.success("✅ تم احتساب نسبة الإنجاز والتقييم للمكاتب!")
+      st.success("✅ تمت محاسبة نسبة الإنجاز والتقييم للمكاتب!")
       st.dataframe(perf_summary, use_container_width=True)
 
       st.markdown("### 📈 مقارنة نسب الإنجاز للمكاتب")
@@ -670,20 +671,20 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI + دمج عمود رصيد المحفظة (كرقم من عمود R / Balance)
+# التبويب الرابع: KPI + دمج عمود رصيد المحفظة (كرقم دقيق من عمود balance)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة (قراءة رقمية)")
   st.write(
-      "ارفع **ملف الإكسل** (الذي يحتوي على الحركات أو ورقة المحفظة)، سيتم تنظيف"
-      " الأرصدة من عمود R/Balance وتحويلها لأرقام."
+      "ارفع **ملف الإكسل** سيتم تنظيف وتصحيح قراءة عمود balance رقمياً بكل"
+      " دقة."
   )
 
   single_excel_file = st.file_uploader(
       "اختر ملف الإكسل (يحتوي Transaction Report / Wallet Report أو جداول"
       " المطابقة)",
       type=["xlsx", "xls"],
-      key="single_combined_excel_file",
+      key="single_combined_excel_file_v4",
   )
 
   if single_excel_file is not None:
@@ -754,7 +755,7 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # --- بناء قاموس مطابقة Short Code مع Balance (عمود R أو بالاسم) كقيمة رقمية حقيقية ---
+      # --- بناء قاموس مطابقة Short Code مع Balance بشكل قاطع ومخصص للنصوص المخزنة أرقاماً ---
       opt_lookup = {}
       opt_code_col = None
       for c in wallet_source_df.columns:
@@ -765,46 +766,36 @@ with tab_kpi:
       if not opt_code_col and len(wallet_source_df.columns) > 0:
         opt_code_col = wallet_source_df.columns[0]
 
-      # البحث عن عمود balance بالاسم أو الفهرس (مثل العمود 17 أو 18 / عمود R)
-      balance_col_target = next(
-          (
-              c
-              for c in wallet_source_df.columns
-              if "balance" in str(c).lower() or "رصيد" in str(c)
-          ),
-          None,
-      )
-      if (
-          not balance_col_target
-          and len(wallet_source_df.columns) >= 18
-          and "balance" in str(wallet_source_df.columns[17]).lower()
-      ):
-        balance_col_target = wallet_source_df.columns[17]
+      balance_col_target = None
+      for c in wallet_source_df.columns:
+        if str(c).strip().lower() == "balance":
+          balance_col_target = c
+          break
+      if not balance_col_target:
+        for c in wallet_source_df.columns:
+          if "balance" in str(c).lower():
+            balance_col_target = c
+            break
 
-      def clean_bal_opt_strict(val):
+      def strict_clean_balance(val):
         if pd.isna(val):
           return 0.0
-        val_s = (
-            str(val)
-            .replace(",", "")
-            .replace(" ", "")
-            .replace("'", "")
-            .strip()
-        )
+        val_s = str(val).strip()
+        cleaned = re.sub(r"[^\d.-]", "", val_s)
         try:
-          return float(val_s)
+          return float(cleaned) if cleaned else 0.0
         except:
           return 0.0
 
       for _, rrow in wallet_source_df.iterrows():
         c_key = (
             str(rrow[opt_code_col]).strip().replace(".0", "")
-            if pd.notna(rrow[opt_code_col])
+            if opt_code_col in rrow and pd.notna(rrow[opt_code_col])
             else ""
         )
         if c_key:
           bal_val = (
-              clean_bal_opt_strict(rrow[balance_col_target])
+              strict_clean_balance(rrow[balance_col_target])
               if balance_col_target and balance_col_target in rrow
               else 0.0
           )
@@ -833,7 +824,6 @@ with tab_kpi:
         row_item = {
             "Short Code (G)": g_clean_str,
             "Arabic Name (F)": f_v,
-            # إدراج الرصيد كقيمة رقمية حقيقية مباشرة (Float/Int) وليس نصاً
             "رصيد المحفظة": raw_bal_num,
         }
 
@@ -870,9 +860,7 @@ with tab_kpi:
       final_kpi_table = pd.DataFrame(kpi_rows_list)
       final_kpi_table = clean_office_code_column(final_kpi_table)
 
-      st.subheader(
-          "📋 نتيجة تقرير الـ KPI (مع عمود رصيد المحفظة الرقمي الحقيقي)"
-      )
+      st.subheader("📋 نتيجة تقرير الـ KPI (مع عمود رصيد المحفظة الرقمي)")
       st.dataframe(final_kpi_table, use_container_width=True)
 
       out_kpi_name = "KPI_Report_With_Wallet_Balance.xlsx"
