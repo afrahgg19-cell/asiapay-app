@@ -3,3 +3,4 @@ google-auth
 pandas
 streamlit
 openpyxl
+xlsxwriter
