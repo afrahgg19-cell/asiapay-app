@@ -635,38 +635,45 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مجموع B2B أرقام مع فواصل 100,000)
+# التبويب الرابع: KPI (مرن تماماً: يعمل على الأول، ولو رفعت الثاني يدمج المندوبين مع فواصل 100,000)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "Short Code (عمود G)، الاسم بالعربي (عمود F)، عد العمليات المحددة من"
-      " العمود B، ومجموع مبالغ Business to Business Transfer كأرقام مع فواصل"
-      " من العمود T."
+      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع ملف المندوبين (اختياري"
+      " لربط الأسماء تلقائياً بالاعتماد على Short Code)."
   )
 
-  kpi_uploaded_file = st.file_uploader(
-      "اختر ملف الإكسل الخاص بـ KPI",
-      type=["xlsx", "xls"],
-      key="kpi_tab_uploader_comma_formatted",
-  )
+  col_k1, col_k2 = st.columns(2)
+  with col_k1:
+    kpi_uploaded_file = st.file_uploader(
+        "اختر ملف الإكسل الخاص بالحركات (KPI)",
+        type=["xlsx", "xls"],
+        key="kpi_main_file_final_v3",
+    )
+  with col_k2:
+    rep_uploaded_file = st.file_uploader(
+        "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
+        type=["xlsx", "xls"],
+        key="kpi_rep_file_final_v3",
+    )
 
   if kpi_uploaded_file is not None:
     try:
       kpi_df = pd.read_excel(kpi_uploaded_file)
-      cols_list = [str(c).strip() for c in kpi_df.columns.tolist()]
 
-      def get_col_safe(preferred_name, fallback_idx):
-        if preferred_name in kpi_df.columns:
+      def get_col_safe(preferred_name, fallback_idx, df_target):
+        if preferred_name in df_target.columns:
           return preferred_name
-        if len(cols_list) > fallback_idx:
-          return cols_list[fallback_idx]
-        return cols_list[0] if cols_list else None
+        cols_local = [str(c).strip() for c in df_target.columns.tolist()]
+        if len(cols_local) > fallback_idx:
+          return df_target.columns[fallback_idx]
+        return df_target.columns[0] if len(cols_local) > 0 else None
 
-      g_col_name = get_col_safe("Short Code", 6)
-      f_col_name = get_col_safe("Arabic Name", 5)
-      b_col_name = get_col_safe("B", 1)
-      t_col_name = get_col_safe("T", 19)
+      g_col_name = get_col_safe("Short Code", 6, kpi_df)
+      f_col_name = get_col_safe("Arabic Name", 5, kpi_df)
+      b_col_name = get_col_safe("B", 1, kpi_df)
+      t_col_name = get_col_safe("T", 19, kpi_df)
 
       work_kpi = pd.DataFrame()
       work_kpi["G_clean"] = (
@@ -685,7 +692,6 @@ with tab_kpi:
           else pd.Series([""] * len(kpi_df))
       )
 
-      # تحويل محتوى عمود T إلى أرقام لتجميعها
       raw_t_series = (
           kpi_df[t_col_name].astype(str)
           if t_col_name in kpi_df.columns
@@ -699,6 +705,48 @@ with tab_kpi:
       work_kpi["T_num"] = pd.to_numeric(
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
+
+      # فحص هل تم رفع ملف المندوبين؟
+      has_rep_file = rep_uploaded_file is not None
+      rep_map_dict = {}
+
+      if has_rep_file:
+        try:
+          rep_df = pd.read_excel(rep_uploaded_file)
+          rep_code_col, rep_name_col = None, None
+          for col in rep_df.columns:
+            c_low = str(col).lower()
+            if (
+                "short" in c_low
+                or "code" in c_low
+                or "كود" in str(col)
+                or "short code" in c_low
+            ):
+              rep_code_col = col
+            if (
+                "مندوب" in str(col)
+                or "representative" in c_low
+                or "rep" in c_low
+                or "اسم" in str(col)
+            ):
+              rep_name_col = col
+
+          if not rep_code_col and len(rep_df.columns) > 0:
+            rep_code_col = rep_df.columns[0]
+          if not rep_name_col and len(rep_df.columns) > 1:
+            rep_name_col = rep_df.columns
+
+          if rep_code_col and rep_name_col:
+            for _, rrow in rep_df.iterrows():
+              c_val = str(rrow[rep_code_col]).strip()
+              n_val = str(rrow[rep_name_col]).strip()
+              rep_map_dict[c_val] = n_val
+          st.success("✅ تم ربط أسماء المندوبين بنجاح.")
+        except Exception as e_rep:
+          st.warning(
+              f"⚠️تعذر قراءة ملف المندوبين، سيتم الاستمرار بدونهم: {e_rep}"
+          )
+          has_rep_file = False
 
       target_ops = [
           "Merchant Payment",
@@ -717,21 +765,23 @@ with tab_kpi:
       ):
         row_item = {
             "Short Code (G)": g_v,
-            "Arabic Name (F)": f_v,
         }
+        if has_rep_file:
+          row_item["اسم المندوب"] = rep_map_dict.get(
+              str(g_v).strip(), "غير محدد"
+          )
 
-        # عد العمليات المحددة فقط من العمود B
+        row_item["Arabic Name (F)"] = f_v
+
         for op in target_ops:
           count_val = grp["B_clean"].str.lower() == op.lower()
           row_item[f"عدد ({op})"] = int(count_val.sum())
 
-        # عملية Business to Business Transfer: تجميع المبالغ كأرقام
         b2b_mask = (
             grp["B_clean"].str.lower() == "business to business transfer"
         )
         total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
 
-        # تنسيق الرقم بـ comma (مثل 100,000 أو 0 إذا كان صفر)
         formatted_b2b = (
             f"{int(total_b2b_sum):,}"
             if total_b2b_sum == int(total_b2b_sum)
@@ -742,10 +792,14 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI المخصص (أرقام مع الفواصل)")
+      st.subheader("📋 نتيجة تقرير الـ KPI")
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = "KPI_Report_Summary_Comma.xlsx"
+      out_kpi_name = (
+          "KPI_Report_With_Reps.xlsx"
+          if has_rep_file
+          else "KPI_Report_Standard.xlsx"
+      )
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
@@ -766,10 +820,10 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_comma_formatted",
+          key="download_kpi_excel_ultimate_final",
       )
 
     except Exception as err:
       st.error(f"⚠️ خطأ أثناء معالجة ملف الـ KPI: {err}")
   else:
-    st.info("📌 يرجى رفع ملف الإكسل الخاص بـ KPI.")
+    st.info("📌 يرجى رفع ملف الإكسل الرئيسي للـ KPI على الأقل لعرض النتائج.")
