@@ -16,6 +16,25 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+# دالة مساعدة لتنظيف الأعمدة النصية أو الرقمية التي تظهر بصيغة .0 مزعجة
+def clean_trailing_zeros(df_target):
+  if df_target is None or df_target.empty:
+    return df_target
+  df_clean = df_target.copy()
+  for col in df_clean.columns:
+    col_str_lower = str(col).lower()
+    # التحقق من الأعمدة التي قد تحمل اسم "تل" أو تظهر بها قيم عشرية .0
+    if "تل" in str(col) or "code" in col_str_lower or "g_clean" in col_str_lower:
+      df_clean[col] = (
+          df_clean[col]
+          .astype(str)
+          .str.replace(r"\.0$", "", regex=True)
+          .replace({"nan": "", "NaN": "", "None": ""})
+      )
+  return df_clean
+
+
 # استخدام الـ Tabs الأربعة العلوية
 tab1, tab2, tab3, tab_kpi = st.tabs([
     "💳 محفظة ASIA PAY",
@@ -79,7 +98,7 @@ def load_wallet_from_db():
             "الباقي في المحفظة",
         ]
     )
-  return df
+  return clean_trailing_zeros(df)
 
 
 def get_latest_balance():
@@ -104,7 +123,7 @@ if "perf_summary" not in st.session_state:
 
 
 # ====================================================
-# القسم الأول: محفظة ASIA PAY (بدون أصفار مزعجة في الحقول)
+# القسم الأول: محفظة ASIA PAY
 # ====================================================
 with tab1:
   st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
@@ -513,8 +532,8 @@ with tab2:
           fill_value=0,
       ).reset_index()
 
-      st.session_state["pivot_result"] = pivot_result
-      st.session_state["combined_df"] = combined_df
+      st.session_state["pivot_result"] = clean_trailing_zeros(pivot_result)
+      st.session_state["combined_df"] = clean_trailing_zeros(combined_df)
 
       st.success("✅ تمت معالجة وحفظ المقارنة بين الشهرين بنجاح!")
 
@@ -563,7 +582,7 @@ with tab3:
       st.session_state["combined_df"] is not None
       and not st.session_state["combined_df"].empty
   ):
-    df_combined = st.session_state["combined_df"]
+    df_combined = clean_trailing_zeros(st.session_state["combined_df"])
 
     code_col = (
         "Short Code"
@@ -620,7 +639,7 @@ with tab3:
           "النقاط المكتسبة",
       ]] = perf_summary.apply(calc_performance_and_progress, axis=1)
 
-      st.session_state["perf_summary"] = perf_summary
+      st.session_state["perf_summary"] = clean_trailing_zeros(perf_summary)
       st.success("✅ تم احتساب نسبة الإنجاز والتقييم للمكاتب!")
       st.dataframe(perf_summary, use_container_width=True)
 
@@ -676,8 +695,12 @@ with tab_kpi:
       t_col_name = get_col_safe("T", 19, kpi_df)
 
       work_kpi = pd.DataFrame()
+      # تنظيف عام لإزالة .0 من الـ Short Code أو الأعمدة الرقمية
       work_kpi["G_clean"] = (
-          kpi_df[g_col_name].astype(str).str.strip()
+          kpi_df[g_col_name]
+          .astype(str)
+          .str.strip()
+          .str.replace(r"\.0$", "", regex=True)
           if g_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
@@ -726,9 +749,17 @@ with tab_kpi:
           opt_extra_cols = [c for c in opt_df.columns if c != opt_code_col]
 
           for _, rrow in opt_df.iterrows():
-            c_key = str(rrow[opt_code_col]).strip()
+            c_key = (
+                str(rrow[opt_code_col]).strip().replace(".0", "")
+                if pd.notna(rrow[opt_code_col])
+                else ""
+            )
             opt_lookup[c_key] = {
-                ec: (rrow[ec] if pd.notna(rrow[ec]) else "")
+                ec: (
+                    str(rrow[ec]).replace(".0", "")
+                    if pd.notna(rrow[ec]) and str(rrow[ec]).endswith(".0")
+                    else (rrow[ec] if pd.notna(rrow[ec]) else "")
+                )
                 for ec in opt_extra_cols
             }
           st.success("✅ تم قراءة الإكسل الاختياري ودمج أعمدته بنجاح.")
@@ -754,9 +785,9 @@ with tab_kpi:
       for (g_v, f_v), grp in work_kpi.groupby(
           ["G_clean", "F_clean"], dropna=False
       ):
-        g_clean_str = str(g_v).strip()
+        g_clean_str = str(g_v).strip().replace(".0", "")
         row_item = {
-            "Short Code (G)": g_v,
+            "Short Code (G)": g_clean_str,
         }
 
         # حقن جميع أعمدة الملف الاختياري المطبقة على Short Code
@@ -802,6 +833,8 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
+      final_kpi_table = clean_trailing_zeros(final_kpi_table)
+
       st.subheader("📋 نتيجة تقرير الـ KPI (مدمج مع الإكسل الاختياري)")
       st.dataframe(final_kpi_table, use_container_width=True)
 
