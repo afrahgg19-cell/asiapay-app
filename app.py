@@ -549,77 +549,220 @@ with tab2:
     )
   else:
     st.info("💡 يرجى رفع ملفات الشهرين في الأعلى لعرض وجرد البيانات.")
-
 # ====================================================
-# القسم الثالث: نسبة الإنجاز للمقارنة بين شهرين
+# القسم الثالث: نسبة الإنجاز
 # ====================================================
 with tab3:
-  st.markdown("### ⭐ نسبة الإنجاز والتقييم للمقارنة بين شهرين")
+  st.markdown("### ⭐ نسبة الإنجاز وحجم النمو")
+
+  if st.session_state["pivot_result"] is not None:
+    p_df = st.session_state["pivot_result"].copy()
+
+    # تحويل الأعمدة إلى مسطحة في حال وجود MultiIndex
+    if isinstance(p_df.columns, pd.MultiIndex):
+      p_df.columns = [
+          "_".join([str(c) for c in col if c]) for col in p_df.columns
+      ]
+
+    col_m1 = [c for c in p_df.columns if "Cleaned_Amount" in c and "الأول" in c]
+    col_m2 = [c for c in p_df.columns if "Cleaned_Amount" in c and "الثاني" in c]
+
+    if col_m1 and col_m2:
+      m1_col = col_m1[0]
+      m2_col = col_m2[0]
+
+      p_df["الفارق"] = p_df[m2_col] - p_df[m1_col]
+      p_df["نسبة النمو (%)"] = (
+          (p_df["الفارق"] / p_df[m1_col].replace(0, 1)) * 100
+      ).round(2)
+
+      st.dataframe(p_df, use_container_width=True)
+
+      buffer_perf = BytesIO()
+      with pd.ExcelWriter(buffer_perf, engine="openpyxl") as writer:
+        p_df.to_excel(writer, index=False)
+      buffer_perf.seek(0)
+
+      st.download_button(
+          label="📥 تحميل تقرير نسبة الإنجاز (Excel)",
+          data=buffer_perf,
+          file_name="Performance_Achievement_Report.xlsx",
+          mime=(
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          ),
+      )
+    else:
+      st.warning("⚠️ لم يتم العثور على أعمدة المبالغ الخاصة بالشهرين للحساب.")
+  else:
+    st.info(
+        "💡 يرجى إكمال رفع ملفات الشهرين في التبويب الثاني أولاً لعرض نسبة"
+        " الإنجاز."
+    )
+
+
+# ====================================================
+# القسم الرابع: KPI
+# ====================================================
+with tab_kpi:
+  st.markdown("### 📈 تقرير الـ KPI وشيت المبيعات")
   st.write(
-      "هذا القسم يعتمد على بيانات المقارنة بين الشهور لتقييم إنجاز المكاتب."
+      "قم برفع ملف الـ KPI الذي يحتوي على شيتات العمليات و شيت wallet report."
   )
 
-  if (
-      st.session_state["combined_df"] is not None
-      and not st.session_state["combined_df"].empty
-  ):
-    df_combined = st.session_state["combined_df"]
+  kpi_uploaded_file = st.file_uploader(
+      "اختر ملف الـ KPI (Excel)", type=["xlsx", "xls"], key="kpi_file"
+  )
 
-    code_col = (
-        "Short Code"
-        if "Short Code" in df_combined.columns
-        else ("G" if "G" in df_combined.columns else df_combined.columns[0])
-    )
-    name_col = (
-        "Arabic Name"
-        if "Arabic Name" in df_combined.columns
-        else (
-            "F"
-            if "F" in df_combined.columns
+  if kpi_uploaded_file is not None:
+    try:
+      # --- 1. استخراج وتجميع أرصدة المحفظة من شيت wallet report ---
+      wallet_balances = {}
+      try:
+        df_wallet_sheet = pd.read_excel(
+            kpi_uploaded_file, sheet_name="wallet report"
+        )
+        col_e = df_wallet_sheet.columns[4]  # Column E (Short Code)
+        col_h = df_wallet_sheet.columns[7]  # Column H (Account Type)
+        col_r = df_wallet_sheet.columns[17]  # Column R (Balance)
+
+        # فلترة الحسابات على Organization E-Money Account
+        filtered_wallet = df_wallet_sheet[
+            df_wallet_sheet[col_h].astype(str).str.strip()
+            == "Organization E-Money Account"
+        ].copy()
+
+        def clean_wallet_amount(val):
+          if pd.isna(val):
+            return 0.0
+          c_str = (
+              str(val)
+              .replace(",", "")
+              .replace(" ", "")
+              .replace("IQD", "")
+              .strip()
+          )
+          try:
+            return float(c_str)
+          except ValueError:
+            return 0.0
+
+        filtered_wallet["clean_bal"] = filtered_wallet[col_r].apply(
+            clean_wallet_amount
+        )
+
+        # تجميع الأرصدة بحسب Short Code
+        for sc, group in filtered_wallet.groupby(col_e):
+          sc_str = str(sc).strip()
+          wallet_balances[sc_str] = group["clean_bal"].sum()
+      except Exception as e_wallet:
+        st.warning(
+            f"ملاحظة: تعذر قراءة شيت wallet report أو تنظيمه: {e_wallet}"
+        )
+        wallet_balances = {}
+
+      # --- 2. معالجة شيتات المبيعات والعمليات ---
+      excel_file = pd.ExcelFile(kpi_uploaded_file)
+      sheet_names = excel_file.sheet_names
+
+      valid_sheets = [s for s in sheet_names if str(s).strip() != "wallet report"]
+
+      all_kpi_dfs = []
+      for sheet in valid_sheets:
+        temp_df = pd.read_excel(excel_file, sheet_name=sheet)
+        all_kpi_dfs.append(temp_df)
+
+      if all_kpi_dfs:
+        combined_kpi_df = pd.concat(all_kpi_dfs, ignore_index=True)
+
+        code_kpi_col = (
+            "Short Code"
+            if "Short Code" in combined_kpi_df.columns
             else (
-                df_combined.columns
-                if len(df_combined.columns) > 1
-                else df_combined.columns[0]
+                "G"
+                if "G" in combined_kpi_df.columns
+                else combined_kpi_df.columns[0]
             )
         )
-    )
+        name_kpi_col = (
+            "Arabic Name"
+            if "Arabic Name" in combined_kpi_df.columns
+            else (
+                "F"
+                if "F" in combined_kpi_df.columns
+                else combined_kpi_df.columns[0]
+            )
+        )
+        reason_kpi_col = (
+            "Reason Type"
+            if "Reason Type" in combined_kpi_df.columns
+            else combined_kpi_df.columns[0]
+        )
 
-    if code_col in df_combined.columns and name_col in df_combined.columns:
-      perf_summary = (
-          df_combined.groupby([code_col, name_col])
-          .agg(
-              إجمالي_العمليات=("Cleaned_Amount", "count"),
-              مجموع_المبالغ=("Cleaned_Amount", "sum"),
-          )
-          .reset_index()
-      )
+        amt_candidates = [
+            c
+            for c in combined_kpi_df.columns
+            if "amount" in str(c).lower() or "مبلغ" in str(c)
+        ]
+        amt_kpi_col = (
+            amt_candidates[0] if amt_candidates else combined_kpi_df.columns[0]
+        )
 
-      target_benchmark = 10000000.0
+        def clean_kpi_amt(val):
+          if pd.isna(val):
+            return 0.0
+          v_str = str(val).replace(",", "").strip()
+          try:
+            return float(v_str)
+          except:
+            return 0.0
 
-      def calc_performance_and_progress(row):
-        amt = row["مجموع_المبالغ"]
-        progress_pct = min(100.0, (amt / target_benchmark) * 100.0)
+        combined_kpi_df["Cleaned_Amount"] = combined_kpi_df[amt_kpi_col].apply(
+            clean_kpi_amt
+        )
 
-        if amt > 5000000:
-          perf_desc = "ممتاز (95%)"
-          points = int(amt / 10000)
-        elif amt > 2000000:
-          perf_desc = "جيد جداً (85%)"
-          points = int(amt / 10000)
-        elif amt > 500000:
-          perf_desc = "جيد (75%)"
-          points = int(amt / 10000)
-        else:
-          perf_desc = "مقبول (60%)"
-          points = int(amt / 10000)
-        return pd.Series([perf_desc, progress_pct, points])
+        # تجميع وحساب الـ KPI
+        kpi_rows = []
+        grouped = combined_kpi_df.groupby([code_kpi_col, name_kpi_col])
 
-      perf_summary[[
-          "نسبة الأداء",
-          "نسبة الإنجاز (%)",
-          "النقاط المكتسبة",
-      ]] = perf_summary.apply(calc_performance_and_progress, axis=1)
+        for (g_code, g_name), group in grouped:
+          g_v = str(g_code).strip()
+          total_amt = group["Cleaned_Amount"].sum()
+          total_tx = len(group)
 
-      st.session_state["perf_summary"] = perf_summary
-      st.success("✅ تم احتساب نسبة الإنجاز والتقييم للمكاتب!")
-      st.dataframe(per
+          row_item = {
+              "Short Code": g_v,
+              "الاسم": g_name,
+              "إجمالي المبيعات / المبالغ": total_amt,
+              "عدد الحركات": total_tx,
+              # إضافة حقل "رصيد المحفظة" بناءً على المطابقة
+              "رصيد المحفظة": wallet_balances.get(g_v, 0.0),
+          }
+
+          # تفاصيل بحسب Reason Type
+          reason_counts = group[reason_kpi_col].value_counts().to_dict()
+          for r_name, r_cnt in reason_counts.items():
+            row_item[f"تكرار - {r_name}"] = r_cnt
+
+          kpi_rows.append(row_item)
+
+        final_kpi_df = pd.DataFrame(kpi_rows).fillna(0)
+
+        st.subheader("📊 جدول KPI الإجمالي ورصيد المحفظة")
+        st.dataframe(final_kpi_df, use_container_width=True)
+
+        buffer_kpi = BytesIO()
+        with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
+          final_kpi_df.to_excel(writer, index=False)
+        buffer_kpi.seek(0)
+
+        st.download_button(
+            label="📥 تحميل تقرير الـ KPI ورصيد المحفظة (Excel)",
+            data=buffer_kpi,
+            file_name="KPI_Wallet_Report.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+
+    except Exception as e:
+      st.error(f"⚠️ حدث خطأ في معالجة ملف الـ KPI: {e}")
