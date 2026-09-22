@@ -104,7 +104,7 @@ if "perf_summary" not in st.session_state:
 
 
 # ====================================================
-# القسم الأول: محفظة ASIA PAY (محمي بـ SQLite)
+# القسم الأول: محفظة ASIA PAY (بدون أصفار مزعجة في الحقول)
 # ====================================================
 with tab1:
   st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
@@ -142,18 +142,20 @@ with tab1:
     with st.form("deposit_form", clear_on_submit=True):
       deposit_amount = st.number_input(
           "المبلغ",
-          value=0.0,
+          value=None,
           min_value=0.0,
           step=1000.0,
           format="%.2f",
           key="dep_amt",
+          placeholder="اكتب المبلغ هنا...",
       )
       deposit_reason = st.text_input("سبب الإيداع / اسم المودع", key="dep_res")
       submit_deposit = st.form_submit_button("حفظ الإيداع")
       if submit_deposit:
-        if deposit_amount > 0:
+        amt_val = 0.0 if deposit_amount is None else float(deposit_amount)
+        if amt_val > 0:
           current_bal = get_latest_balance()
-          new_bal = current_bal + deposit_amount
+          new_bal = current_bal + amt_val
           conn = sqlite3.connect(DB_FILE)
           c = conn.cursor()
           c.execute(
@@ -164,7 +166,7 @@ with tab1:
               (
                   str(pd.Timestamp.now()),
                   "إيداع للمحفظة",
-                  deposit_amount,
+                  amt_val,
                   deposit_reason,
                   "إيداع",
                   "لا توجد",
@@ -183,11 +185,12 @@ with tab1:
     with st.form("withdraw_form", clear_on_submit=True):
       withdraw_amount = st.number_input(
           "المبلغ",
-          value=0.0,
+          value=None,
           min_value=0.0,
           step=1000.0,
           format="%.2f",
           key="wit_amt",
+          placeholder="اكتب المبلغ هنا...",
       )
       withdraw_reason = st.text_input(
           "اسم المكاتب / السحب منه / المسؤول", key="wit_res"
@@ -197,9 +200,10 @@ with tab1:
       )
       submit_withdraw = st.form_submit_button("حفظ السحب")
       if submit_withdraw:
-        if withdraw_amount > 0:
+        amt_val = 0.0 if withdraw_amount is None else float(withdraw_amount)
+        if amt_val > 0:
           current_bal = get_latest_balance()
-          new_bal = current_bal - withdraw_amount
+          new_bal = current_bal - amt_val
           debt_status = (
               "غير مسدد (مديونية)"
               if payment_method == "مديونية (دين)"
@@ -215,7 +219,7 @@ with tab1:
               (
                   str(pd.Timestamp.now()),
                   "سحب كاش",
-                  withdraw_amount,
+                  amt_val,
                   withdraw_reason,
                   payment_method,
                   debt_status,
@@ -234,18 +238,20 @@ with tab1:
     with st.form("return_form", clear_on_submit=True):
       return_amount = st.number_input(
           "المبلغ الراجع",
-          value=0.0,
+          value=None,
           min_value=0.0,
           step=1000.0,
           format="%.2f",
           key="ret_amt",
+          placeholder="اكتب المبلغ هنا...",
       )
       return_reason = st.text_input("سبب الاسترجاع / من الجهة", key="ret_res")
       submit_return = st.form_submit_button("إلغاء واسترجاع للمحفظة")
       if submit_return:
-        if return_amount > 0:
+        amt_val = 0.0 if return_amount is None else float(return_amount)
+        if amt_val > 0:
           current_bal = get_latest_balance()
-          new_bal = current_bal + return_amount
+          new_bal = current_bal + amt_val
           conn = sqlite3.connect(DB_FILE)
           c = conn.cursor()
           c.execute(
@@ -256,7 +262,7 @@ with tab1:
               (
                   str(pd.Timestamp.now()),
                   "استرجاع للمحفظة",
-                  return_amount,
+                  amt_val,
                   return_reason,
                   "استرجاع",
                   "لا توجد",
@@ -629,20 +635,20 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مجموع مبالغ B2B كأرقام وليست نصوص)
+# التبويب الرابع: KPI (مجموع B2B أرقام مع فواصل 100,000)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
       "Short Code (عمود G)، الاسم بالعربي (عمود F)، عد العمليات المحددة من"
-      " العمود B، ومجموع مبالغ Business to Business Transfer كأرقام من العمود"
-      " T."
+      " العمود B، ومجموع مبالغ Business to Business Transfer كأرقام مع فواصل"
+      " من العمود T."
   )
 
   kpi_uploaded_file = st.file_uploader(
       "اختر ملف الإكسل الخاص بـ KPI",
       type=["xlsx", "xls"],
-      key="kpi_tab_uploader_sum_final_fixed",
+      key="kpi_tab_uploader_comma_formatted",
   )
 
   if kpi_uploaded_file is not None:
@@ -725,17 +731,21 @@ with tab_kpi:
         )
         total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
 
-        row_item["مجموع مبالغ Business to Business Transfer"] = float(
-            total_b2b_sum
+        # تنسيق الرقم بـ comma (مثل 100,000 أو 0 إذا كان صفر)
+        formatted_b2b = (
+            f"{int(total_b2b_sum):,}"
+            if total_b2b_sum == int(total_b2b_sum)
+            else f"{total_b2b_sum:,.2f}"
         )
+        row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI المخصص (مجموع كأرقام)")
+      st.subheader("📋 نتيجة تقرير الـ KPI المخصص (أرقام مع الفواصل)")
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = "KPI_Report_Summary_Sum.xlsx"
+      out_kpi_name = "KPI_Report_Summary_Comma.xlsx"
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
@@ -756,7 +766,7 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_sum_final_fixed",
+          key="download_kpi_excel_comma_formatted",
       )
 
     except Exception as err:
