@@ -481,11 +481,7 @@ with tab2:
       code_col = (
           "Short Code"
           if "Short Code" in combined_df.columns
-          else (
-              "G"
-              if "G" in combined_df.columns
-              else combined_df.columns[0]
-          )
+          else ("G" if "G" in combined_df.columns else combined_df.columns[0])
       )
       name_col = (
           "Arabic Name"
@@ -566,11 +562,7 @@ with tab3:
     code_col = (
         "Short Code"
         if "Short Code" in df_combined.columns
-        else (
-            "G"
-            if "G" in df_combined.columns
-            else df_combined.columns[0]
-        )
+        else ("G" if "G" in df_combined.columns else df_combined.columns[0])
     )
     name_col = (
         "Arabic Name"
@@ -637,19 +629,20 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مصحح آمن للفهارس والأسماء)
+# التبويب الرابع: KPI (مجموع مبالغ B2B كأرقام وليست نصوص)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
       "Short Code (عمود G)، الاسم بالعربي (عمود F)، عد العمليات المحددة من"
-      " العمود B، ونصوص Business to Business Transfer من العمود T."
+      " العمود B، ومجموع مبالغ Business to Business Transfer كأرقام من العمود"
+      " T."
   )
 
   kpi_uploaded_file = st.file_uploader(
       "اختر ملف الإكسل الخاص بـ KPI",
       type=["xlsx", "xls"],
-      key="kpi_tab_uploader_exact_fixed_final",
+      key="kpi_tab_uploader_sum_final_fixed",
   )
 
   if kpi_uploaded_file is not None:
@@ -685,11 +678,21 @@ with tab_kpi:
           if b_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
-      work_kpi["T_text"] = (
-          kpi_df[t_col_name].astype(str).str.strip()
+
+      # تحويل محتوى عمود T إلى أرقام لتجميعها
+      raw_t_series = (
+          kpi_df[t_col_name].astype(str)
           if t_col_name in kpi_df.columns
-          else pd.Series([""] * len(kpi_df))
+          else pd.Series(["0"] * len(kpi_df))
       )
+      cleaned_t_numeric = (
+          raw_t_series.str.replace(",", "", regex=False)
+          .str.replace(" ", "", regex=False)
+          .str.replace("$", "", regex=False)
+      )
+      work_kpi["T_num"] = pd.to_numeric(
+          cleaned_t_numeric, errors="coerce"
+      ).fillna(0.0)
 
       target_ops = [
           "Merchant Payment",
@@ -716,28 +719,23 @@ with tab_kpi:
           count_val = grp["B_clean"].str.lower() == op.lower()
           row_item[f"عدد ({op})"] = int(count_val.sum())
 
-        # عملية Business to Business Transfer من العمود T (نصوص)
+        # عملية Business to Business Transfer: تجميع المبالغ كأرقام
         b2b_mask = (
             grp["B_clean"].str.lower() == "business to business transfer"
         )
-        b2b_texts = [
-            t
-            for t in grp.loc[b2b_mask, "T_text"].tolist()
-            if str(t).lower() not in ["nan", "none", "", "nat", "np.nan"]
-        ]
+        total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
 
-        # وضع النصوص كما هي (بدون تحويل أرقام)
-        row_item["مبالغ Business to Business Transfer (نصوص من T)"] = (
-            " | ".join(b2b_texts) if b2b_texts else "لا توجد"
+        row_item["مجموع مبالغ Business to Business Transfer"] = float(
+            total_b2b_sum
         )
 
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI المخصص")
+      st.subheader("📋 نتيجة تقرير الـ KPI المخصص (مجموع كأرقام)")
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = "KPI_Report_Summary_Exact.xlsx"
+      out_kpi_name = "KPI_Report_Summary_Sum.xlsx"
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
@@ -758,7 +756,7 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_exact_fixed_final",
+          key="download_kpi_excel_sum_final_fixed",
       )
 
     except Exception as err:
