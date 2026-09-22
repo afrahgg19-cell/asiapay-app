@@ -670,32 +670,53 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI + دمج عمود رصيد المحفظة من الشيت الثاني
+# التبويب الرابع: KPI + دمج عمود رصيد المحفظة من نفس الملف (أو شيت Wallet Report)
 # ====================================================
 with tab_kpi:
-  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة من الشيت الثاني")
+  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة من نفس الملف")
   st.write(
-      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع الشيت الثاني (يحتوي على"
-      " Short Code وعمود رصيد المحفظة / أي أعمدة إضافية)."
+      "ارفع **ملف الإكسل** (الذي يحتوي على ورقتي الحركات والمحفظة، أو"
+      " الشيتين معاً). سيتم مطابقة Short Code أوتوماتيكياً وإضافة عمود رصيد"
+      " المحفظة."
   )
 
-  col_k1, col_k2 = st.columns(2)
-  with col_k1:
-    kpi_uploaded_file = st.file_uploader(
-        "اختر ملف الإكسل الخاص بالحركات (KPI)",
-        type=["xlsx", "xls"],
-        key="kpi_main_file_merged_v9",
-    )
-  with col_k2:
-    opt_uploaded_file = st.file_uploader(
-        "اختر الشيت الثاني (يحتوي على Short Code ورصيد المحفظة)",
-        type=["xlsx", "xls"],
-        key="kpi_opt_file_merged_v9",
-    )
+  single_excel_file = st.file_uploader(
+      "اختر ملف الإكسل (يحتوي Transaction Report / Wallet Report أو جداول المطابقة)",
+      type=["xlsx", "xls"],
+      key="single_combined_excel_file",
+  )
 
-  if kpi_uploaded_file is not None:
+  if single_excel_file is not None:
     try:
-      kpi_df = pd.read_excel(kpi_uploaded_file)
+      # قراءة الأوراق المتاحة أو قراءة الملف بشكل افتراضي
+      excel_reader = pd.ExcelFile(single_excel_file)
+      sheet_names = excel_reader.sheet_names
+
+      st.write("الأوراق المتاحة في الملف المرفق:", sheet_names)
+
+      # اختيار ورقة الحركات وورقة المحفظة إن توفرتا أوتوماتيكياً أو بالترتيب
+      trans_sheet_name = (
+          next((s for s in sheet_names if "trans" in s.lower() or "حرك" in s), None)
+          or sheet_names[0]
+      )
+      wallet_sheet_name = next(
+          (
+              s
+              for s in sheet_names
+              if "wallet" in s.lower() or "محفظ" in s or "report" in s.lower()
+          ),
+          sheet_names if len(sheet_names) > 1 else sheet_names[0],
+      )
+
+      kpi_df = pd.read_excel(single_excel_file, sheet_name=trans_sheet_name)
+      wallet_source_df = pd.read_excel(
+          single_excel_file,
+          sheet_name=(
+              wallet_sheet_name
+              if wallet_sheet_name != trans_sheet_name
+              else trans_sheet_name
+          ),
+      )
 
       g_col_name = get_col_safe("Short Code", 6, kpi_df)
       f_col_name = get_col_safe("Arabic Name", 5, kpi_df)
@@ -735,59 +756,50 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # --- قراءة الشيت الثاني وربط أعمدته (بضمنها رصيد المحفظة) عبر Short Code ---
-      has_opt_file = opt_uploaded_file is not None
+      # --- بناء قاموس مطابقة Short Code مع Balance من ورقة المحفظة ---
       opt_lookup = {}
-      opt_extra_cols = []
+      opt_code_col = None
+      for c in wallet_source_df.columns:
+        c_low = str(c).lower()
+        if "short" in c_low and "code" in c_low:
+          opt_code_col = c
+          break
+      if not opt_code_col and len(wallet_source_df.columns) > 0:
+        opt_code_col = wallet_source_df.columns[0]
 
-      if has_opt_file:
+      balance_col_target = next(
+          (
+              c
+              for c in wallet_source_df.columns
+              if "balance" in str(c).lower() or "رصيد" in str(c)
+          ),
+          None,
+      )
+
+      def clean_bal_opt(val):
+        if pd.isna(val):
+          return 0.0
+        val_s = str(val).replace(",", "").replace(" ", "").strip()
         try:
-          opt_df = pd.read_excel(opt_uploaded_file)
-          opt_code_col = None
-          for c in opt_df.columns:
-            c_low = str(c).lower()
-            if "short" in c_low and "code" in c_low:
-              opt_code_col = c
-              break
-          if not opt_code_col and len(opt_df.columns) > 0:
-            opt_code_col = opt_df.columns[0]
+          return float(val_s)
+        except:
+          return 0.0
 
-          opt_extra_cols = [c for c in opt_df.columns if c != opt_code_col]
-
-          def clean_bal_opt(val):
-            if pd.isna(val):
-              return 0.0
-            val_s = str(val).replace(",", "").replace(" ", "").strip()
-            try:
-              return float(val_s)
-            except:
-              return val
-
-          for _, rrow in opt_df.iterrows():
-            c_key = (
-                str(rrow[opt_code_col]).strip().replace(".0", "")
-                if pd.notna(rrow[opt_code_col])
-                else ""
-            )
-            opt_lookup[c_key] = {
-                ec: (
-                    clean_bal_opt(rrow[ec])
-                    if "balance" in str(ec).lower()
-                    or "رصيد" in str(ec).lower()
-                    else (rrow[ec] if pd.notna(rrow[ec]) else "")
-                )
-                for ec in opt_extra_cols
-            }
-          st.success(
-              "✅ تم قراءة الشيت الثاني وربط أعمدة الأرصدة والبيانات عبر"
-              " Short Code."
+      for _, rrow in wallet_source_df.iterrows():
+        c_key = (
+            str(rrow[opt_code_col]).strip().replace(".0", "")
+            if pd.notna(rrow[opt_code_col])
+            else ""
+        )
+        if c_key:
+          bal_val = (
+              clean_bal_opt(rrow[balance_col_target])
+              if balance_col_target and balance_col_target in rrow
+              else 0.0
           )
-        except Exception as e_opt:
-          st.warning(
-              f"⚠️تعذر قراءة الشيت الثاني، سيتم المتابعة بدونه: {e_opt}"
-          )
-          has_opt_file = False
-          opt_extra_cols = []
+          opt_lookup[c_key] = bal_val
+
+      st.success("✅ تمت قراءة المطابقة وربط عمود رصيد المحفظة بنجاح.")
 
       target_ops = [
           "Merchant Payment",
@@ -807,17 +819,10 @@ with tab_kpi:
         g_clean_str = str(g_v).strip().replace(".0", "")
         row_item = {
             "Short Code (G)": g_clean_str,
+            "Arabic Name (F)": f_v,
+            # إضافة عمود رصيد المحفظة المباشر والمطابق
+            "رصيد المحفظة": opt_lookup.get(g_clean_str, 0.0),
         }
-
-        # حقن جميع أعمدة الشيت الثاني (بضمنها رصيد المحفظة) المطبقة على Short Code
-        if has_opt_file:
-          if g_clean_str in opt_lookup:
-            row_item.update(opt_lookup[g_clean_str])
-          else:
-            for ec in opt_extra_cols:
-              row_item[ec] = 0.0 if "balance" in str(ec).lower() else ""
-
-        row_item["Arabic Name (F)"] = f_v
 
         for op in target_ops:
           count_val = grp["B_clean"].str.lower() == op.lower()
@@ -835,7 +840,6 @@ with tab_kpi:
         )
         row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
-        # --- شروط B2B للـ 100 ألف والـ 3 مليون ---
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
         )
@@ -843,7 +847,6 @@ with tab_kpi:
             "Done" if total_b2b_sum > 2999000 else ""
         )
 
-        # --- شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done) ---
         high_t_count = int((grp["T_num"] > 4999).sum())
         row_item["عدد الحركات > 4999 (4+)"] = (
             "Done" if high_t_count >= 4 else ""
@@ -855,39 +858,29 @@ with tab_kpi:
       final_kpi_table = clean_office_code_column(final_kpi_table)
 
       st.subheader(
-          "📋 نتيجة تقرير الـ KPI (مدمج معه عمود رصيد المحفظة من الشيت الثاني)"
+          "📋 نتيجة تقرير الـ KPI (مع عمود رصيد المحفظة المدمج تلقائياً)"
       )
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = (
-          "KPI_Report_Merged_WalletBalance.xlsx"
-          if has_opt_file
-          else "KPI_Report_Standard.xlsx"
-      )
+      out_kpi_name = "KPI_Report_With_Wallet_Balance.xlsx"
       buffer_kpi = BytesIO()
 
-      df_to_save_kpi = final_kpi_table.copy()
-      if isinstance(df_to_save_kpi.columns, pd.MultiIndex):
-        df_to_save_kpi.columns = [
-            "_".join([str(c) for c in col if c])
-            for col in df_to_save_kpi.columns
-        ]
-
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
-        df_to_save_kpi.to_excel(writer, index=False)
+        final_kpi_table.to_excel(writer, index=False)
       buffer_kpi.seek(0)
 
       st.download_button(
-          label="📥 تحميل تقرير KPI نهائي مدمج مع الأرصدة (Excel)",
+          label="📥 تحميل التقرير النهائي مع رصيد المحفظة (Excel)",
           data=buffer_kpi,
           file_name=out_kpi_name,
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_optional_merge_v9",
       )
 
     except Exception as err:
-      st.error(f"⚠️ خطأ أثناء معالجة ملف الـ KPI: {err}")
+      st.error(f"⚠️ خطأ أثناء معالجة الملف: {err}")
   else:
-    st.info("📌 يرجى رفع ملف الإكسل الرئيسي للـ KPI على الأقل لعرض النتائج.")
+    st.info(
+        "📌 يرجى رفع ملف الإكسل الذي يحتوي على الحركات والمحفظة لعرض النتائج."
+    )
