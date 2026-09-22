@@ -16,7 +16,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# استخدام الـ Tabs الأربعة العلوية
 tab1, tab2, tab3, tab_kpi = st.tabs([
     "💳 محفظة ASIA PAY",
     "📊 المقارنة بين شهرين",
@@ -94,7 +93,16 @@ def get_latest_balance():
   return row[0] if row else 0.0
 
 
-# --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
+# تنظيف الشورت كود لإزالة .0 أو المسافات
+def clean_code(val):
+  if pd.isna(val):
+    return ""
+  s = str(val).strip()
+  if s.endswith(".0"):
+    s = s[:-2]
+  return s
+
+
 if "pivot_result" not in st.session_state:
   st.session_state["pivot_result"] = None
 if "combined_df" not in st.session_state:
@@ -102,17 +110,14 @@ if "combined_df" not in st.session_state:
 if "perf_summary" not in st.session_state:
   st.session_state["perf_summary"] = None
 
-
 # ====================================================
 # القسم الأول: محفظة ASIA PAY
 # ====================================================
 with tab1:
   st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
   st.markdown("---")
-
   df = load_wallet_from_db()
   last_balance = get_latest_balance()
-
   total_deposit = (
       df[df["نوع العملية"] == "إيداع للمحفظة"]["المبلغ"].sum()
       if not df.empty and "نوع العملية" in df.columns
@@ -135,7 +140,6 @@ with tab1:
     )
 
   st.markdown("---")
-
   c1, c2, c3 = st.columns(3)
   with c1:
     st.subheader("📥 إيداع للمحفظة")
@@ -317,75 +321,91 @@ with tab3:
   st.info("قسم الإنجاز مرتبط ببيانات المقارنة.")
 
 # ====================================================
-# التبويب الرابع: KPI (يقرأ الشيت الأول للحركات والشيت الثاني wallet report من نفس الملف)
+# التبويب الرابع: KPI
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "ارفع **ملف الإكسل الرئيسي** (الذي يحتوي في شيتاته على الحركات وشيت"
-      " `wallet report` أو الشيت الثاني)، وملف المندوبين الاختياري."
+      "ارفع **ملف الإكسل الرئيسي** (الشيت الأول للحركات + الشيت الثاني"
+      " `Transaction Report` أو `wallet report`)."
   )
 
   col_k1, col_k2 = st.columns(2)
   with col_k1:
     kpi_uploaded_file = st.file_uploader(
-        "ملف الإكسل الرئيسي (شيت الحركات + شيت wallet report)",
-        type=["xlsx", "xls"],
-        key="kpi_main_single_file_v8",
+        "ملف الإكسل الرئيسي", type=["xlsx", "xls"], key="kpi_main_single_v9"
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
-        "ملف المندوبين (اختياري - Short Code + اسم المندوب)",
+        "ملف المندوبين (اختياري)",
         type=["xlsx", "xls"],
-        key="kpi_rep_single_file_v8",
+        key="kpi_rep_single_v9",
     )
 
   if kpi_uploaded_file is not None:
     try:
-      # قراءة جميع الشيتات من نفس الملف
       excel_file_obj = pd.ExcelFile(kpi_uploaded_file)
       sheet_names = excel_file_obj.sheet_names
-
-      # قراءة الشيت الأول للحركات
       kpi_df = pd.read_excel(excel_file_obj, sheet_name=sheet_names[0])
 
-      # محاولة البحث عن شيت wallet report أو أخذ الشيت الثاني إنفوجد
+      # البحث عن شيت wallet report / transaction report
       wallet_report_sheet_name = None
       for s_name in sheet_names:
-        if "wallet" in str(s_name).lower() or "report" in str(s_name).lower():
+        l_name = str(s_name).lower()
+        if (
+            "wallet" in l_name
+            or "report" in l_name
+            or "transaction" in l_name
+        ):
           wallet_report_sheet_name = s_name
           break
       if not wallet_report_sheet_name and len(sheet_names) > 1:
         wallet_report_sheet_name = sheet_names
 
-      def get_col_exact(preferred_name, fallback_idx, df_target):
-        if preferred_name in df_target.columns:
-          return preferred_name
-        cols_local = [str(c).strip() for c in df_target.columns.tolist()]
-        if len(cols_local) > fallback_idx:
-          return df_target.columns[fallback_idx]
-        return df_target.columns[0] if len(cols_local) > 0 else None
-
-      g_col_name = get_col_exact("Short Code", 6, kpi_df)
-      f_col_name = get_col_exact("Arabic Name", 5, kpi_df)
-      b_col_name = get_col_exact("B", 1, kpi_df)
-      t_col_name = get_col_exact("T", 19, kpi_df)
+      g_col_name = (
+          "Short Code"
+          if "Short Code" in kpi_df.columns
+          else (
+              kpi_df.columns[6]
+              if len(kpi_df.columns) > 6
+              else kpi_df.columns[0]
+          )
+      )
+      f_col_name = (
+          "Arabic Name"
+          if "Arabic Name" in kpi_df.columns
+          else (
+              kpi_df.columns[5]
+              if len(kpi_df.columns) > 5
+              else kpi_df.columns[0]
+          )
+      )
+      b_col_name = (
+          "B"
+          if "B" in kpi_df.columns
+          else (kpi_df.columns if len(kpi_df.columns) > 1 else kpi_df.columns[0])
+      )
+      t_col_name = (
+          "T"
+          if "T" in kpi_df.columns
+          else (
+              kpi_df.columns[19]
+              if len(kpi_df.columns) > 19
+              else kpi_df.columns[0]
+          )
+      )
 
       work_kpi = pd.DataFrame()
-      work_kpi["G_clean"] = (
-          kpi_df[g_col_name].astype(str).str.strip()
-          if g_col_name in kpi_df.columns
-          else pd.Series([""] * len(kpi_df))
-      )
+      work_kpi["G_clean"] = kpi_df[g_col_name].apply(clean_code)
       work_kpi["F_clean"] = (
           kpi_df[f_col_name].astype(str).str.strip()
           if f_col_name in kpi_df.columns
-          else pd.Series([""] * len(kpi_df))
+          else ""
       )
       work_kpi["B_clean"] = (
           kpi_df[b_col_name].astype(str).str.strip()
           if b_col_name in kpi_df.columns
-          else pd.Series([""] * len(kpi_df))
+          else ""
       )
 
       raw_t_series = (
@@ -402,34 +422,26 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # معالجة شيت wallet report من نفس الملف الرئيسي
       e_money_map = {}
       if wallet_report_sheet_name:
         try:
           w_rep_df = pd.read_excel(
               excel_file_obj, sheet_name=wallet_report_sheet_name
           )
-          # عمود H (الفهرس 7 أو الحرف H)، عمود R (الفهرس 17)، عمود E (الفهرس 4)
           h_col = (
               w_rep_df.columns[7]
               if len(w_rep_df.columns) > 7
-              else (
-                  "H" if "H" in w_rep_df.columns else w_rep_df.columns[min(7, len(w_rep_df.columns) - 1)]
-              )
+              else w_rep_df.columns[0]
           )
           r_col = (
               w_rep_df.columns[17]
               if len(w_rep_df.columns) > 17
-              else (
-                  "R" if "R" in w_rep_df.columns else w_rep_df.columns[min(17, len(w_rep_df.columns) - 1)]
-              )
+              else w_rep_df.columns[-1]
           )
           e_col = (
               w_rep_df.columns[4]
               if len(w_rep_df.columns) > 4
-              else (
-                  "E" if "E" in w_rep_df.columns else w_rep_df.columns[min(4, len(w_rep_df.columns) - 1)]
-              )
+              else w_rep_df.columns[0]
           )
 
           filtered_w = w_rep_df[
@@ -440,27 +452,23 @@ with tab_kpi:
           def clean_r_val(val):
             if pd.isna(val):
               return 0.0
-            val_s = str(val).replace(",", "").strip()
             try:
-              return float(val_s)
+              return float(str(val).replace(",", "").strip())
             except:
               return 0.0
 
           filtered_w["clean_R"] = filtered_w[r_col].apply(clean_r_val)
-          filtered_w["e_code_clean"] = (
-              filtered_w[e_col].astype(str).str.strip()
-          )
+          filtered_w["e_code_clean"] = filtered_w[e_col].apply(clean_code)
 
           grouped_e = filtered_w.groupby("e_code_clean")["clean_R"].sum()
           e_money_map = grouped_e.to_dict()
           st.success(
-              f"✅ تم قراءة الفلترة لـ Organization E-Money Account من الشيت"
-              f" ({wallet_report_sheet_name}) بنجاح."
+              f"✅ تمت فلترة الشيت ({wallet_report_sheet_name}) لـ Organization"
+              f" E-Money Account بنجاح."
           )
         except Exception as e_w:
           st.warning(f"⚠️ تعذر تحليل شيت wallet report: {e_w}")
 
-      # ربط المندوبين
       has_rep_file = rep_uploaded_file is not None
       rep_map_dict = {}
       if has_rep_file:
@@ -469,19 +477,9 @@ with tab_kpi:
           rep_code_col, rep_name_col = None, None
           for col in rep_df.columns:
             c_low = str(col).lower()
-            if (
-                "short" in c_low
-                or "code" in c_low
-                or "كود" in str(col)
-                or "short code" in c_low
-            ):
+            if "short" in c_low or "code" in c_low or "كود" in str(col):
               rep_code_col = col
-            if (
-                "مندوب" in str(col)
-                or "representative" in c_low
-                or "rep" in c_low
-                or "اسم" in str(col)
-            ):
+            if "مندوب" in str(col) or "rep" in c_low or "اسم" in str(col):
               rep_name_col = col
           if not rep_code_col and len(rep_df.columns) > 0:
             rep_code_col = rep_df.columns[0]
@@ -489,10 +487,10 @@ with tab_kpi:
             rep_name_col = rep_df.columns
           if rep_code_col and rep_name_col:
             for _, rrow in rep_df.iterrows():
-              c_val = str(rrow[rep_code_col]).strip()
+              c_val = clean_code(rrow[rep_code_col])
               n_val = str(rrow[rep_name_col]).strip()
               rep_map_dict[c_val] = n_val
-        except Exception as e_rep:
+        except Exception:
           has_rep_file = False
 
       target_ops = [
@@ -510,21 +508,19 @@ with tab_kpi:
       for (g_v, f_v), grp in work_kpi.groupby(
           ["G_clean", "F_clean"], dropna=False
       ):
+        g_clean_str = clean_code(g_v)
         row_item = {
-            "Short Code (G)": g_v,
+            "Short Code (G)": g_clean_str,
+            "Arabic Name (F)": f_v,
         }
         if has_rep_file:
           row_item["اسم المندوب"] = rep_map_dict.get(
-              str(g_v).strip(), "غير محدد"
+              g_clean_str, "غير محدد"
           )
 
-        row_item["Arabic Name (F)"] = f_v
-
-        # إضافة عمود Organization E-Money Account المفلتر ومحول بفواصل عشرية بناءً على الشورت كود E مطابقة لـ G
-        e_val_raw = e_money_map.get(str(g_v).strip(), 0.0)
-        row_item["Organization E-Money Account (R-sum)"] = (
-            f"{e_val_raw:,.2f}"
-        )
+        # إضافة عمود Organization E-Money Account في مكان واضح متقدم
+        e_val_raw = e_money_map.get(g_clean_str, 0.0)
+        row_item["Organization E-Money Account"] = f"{e_val_raw:,.2f}"
 
         for op in target_ops:
           count_val = grp["B_clean"].str.lower() == op.lower()
@@ -534,13 +530,11 @@ with tab_kpi:
             grp["B_clean"].str.lower() == "business to business transfer"
         )
         total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
-
-        formatted_b2b = (
+        row_item["مجموع مبالغ Business to Business Transfer"] = (
             f"{int(total_b2b_sum):,}"
             if total_b2b_sum == int(total_b2b_sum)
             else f"{total_b2b_sum:,.2f}"
         )
-        row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
