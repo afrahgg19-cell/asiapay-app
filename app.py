@@ -22,15 +22,6 @@ tab1, tab2, tab3, tab_kpi = st.tabs([
     "📈 KPI",
 ])
 
-with tab1:
-  st.info("التبويب الأول - محفظة ASIA PAY")
-
-with tab2:
-  st.info("التبويب الثاني - المقارنة بين شهرين")
-
-with tab3:
-  st.info("التبويب الثالث - نسبة الإنجاز")
-
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة")
   st.write(
@@ -58,7 +49,7 @@ with tab_kpi:
 
       kpi_df = pd.read_excel(kpi_uploaded_file, sheet_name=0)
 
-      wallet_info_map = {}
+      wallet_balance_map = {}
       wallet_sheet_name = None
       for s in sheet_names:
         if "wallet" in s.lower():
@@ -70,7 +61,7 @@ with tab_kpi:
       if wallet_sheet_name:
         w_df = pd.read_excel(kpi_uploaded_file, sheet_name=wallet_sheet_name)
         st.caption(
-            f"✅ يتم قراءة بيانات المحفظة من الورقة: '{wallet_sheet_name}'"
+            f"✅ يتم قراءة رصيد المحفظة من الورقة: '{wallet_sheet_name}'"
         )
 
         h_col_w = next(
@@ -88,18 +79,6 @@ with tab_kpi:
             ),
             None,
         )
-        wallet_num_col_w = next(
-            (
-                c
-                for c in w_df.columns
-                if "number" in str(c).lower()
-                or ("account" in str(c).lower() and c != h_col_w)
-            ),
-            None,
-        )
-
-        if not wallet_num_col_w and len(w_df.columns) > 1:
-          wallet_num_col_w = w_df.columns
         if not e_col_w and len(w_df.columns) > 4:
           e_col_w = w_df.columns
         if not h_col_w and len(w_df.columns) > 7:
@@ -138,27 +117,11 @@ with tab_kpi:
               filtered_w[e_col_w].astype(str).str.strip().str.upper()
           )
 
-          for _, wrow in filtered_w.iterrows():
-            k_key = wrow["key_clean"]
-            if k_key and k_key != "NAN":
-              cur_bal = wrow["cleaned_R"]
-              w_num = (
-                  str(wrow[wallet_num_col_w]).strip()
-                  if wallet_num_col_w in w_df.columns
-                  else ""
-              )
-              acc_type_val = str(wrow[h_col_w]).strip()
-              if k_key not in wallet_info_map:
-                wallet_info_map[k_key] = {
-                    "رقم المحفظة": w_num,
-                    "حالة/نوع المحفظة": acc_type_val,
-                    "رصيد المحفظة": cur_bal,
-                }
-              else:
-                wallet_info_map[k_key]["رصيد المحفظة"] += cur_bal
-
+          wallet_balance_map = (
+              filtered_w.groupby("key_clean")["cleaned_R"].sum().to_dict()
+          )
           st.success(
-              "✅ تمت مطابقة وتجميع بيانات وأرصدة المحفظة حسب الشورت كود"
+              "✅ تمت مطابقة وتجميع أرصدة المحفظة حسب الشورت كود في العمود E"
               " بنجاح!"
           )
         else:
@@ -268,34 +231,20 @@ with tab_kpi:
       for (e_v, f_v), grp in work_kpi.groupby(
           ["E_clean", "F_clean"], dropna=False
       ):
-        g_str_key = str(e_v).strip().upper()
-        w_info = wallet_info_map.get(
-            g_str_key,
-            {
-                "رقم المحفظة": "غير متوفر",
-                "حالة/نوع المحفظة": "غير متوفر",
-                "رصيد المحفظة": 0.0,
-            },
-        )
-        emp_name = (
-            rep_map_dict.get(g_str_key, "غير محدد")
-            if has_rep_file
-            else "غير محدد"
-        )
-        wallet_val = w_info["رصيد المحفظة"]
+        row_item = {"Short Code (E)": e_v}
+        if has_rep_file:
+          row_item["اسم المندوب"] = rep_map_dict.get(
+              str(e_v).strip().upper(), "غير محدد"
+          )
+        row_item["Arabic Name (F)"] = f_v
 
-        row_item = {
-            "Short Code (E)": e_v,
-            "Arabic Name (F)": f_v,
-            "اسم الموظف": emp_name,
-            "رقم المحفظة": w_info["رقم المحفظة"],
-            "حالة/نوع المحفظة": w_info["حالة/نوع المحفظة"],
-            "رصيد المحفظة": (
-                f"{wallet_val:,.2f}"
-                if isinstance(wallet_val, (int, float, np.number))
-                else wallet_val
-            ),
-        }
+        g_str_key = str(e_v).strip().upper()
+        wallet_val = wallet_balance_map.get(g_str_key, 0.0)
+        row_item["رصيد المحفظة"] = (
+            f"{wallet_val:,.2f}"
+            if isinstance(wallet_val, (int, float, np.number))
+            else wallet_val
+        )
 
         for op in target_ops:
           count_val = grp["B_clean"].str.lower() == op.lower()
@@ -323,12 +272,14 @@ with tab_kpi:
       st.subheader("📋 نتيجة تقرير الـ KPI النهائي")
       st.dataframe(final_kpi_table, use_container_width=True)
 
+      # تصدير مع تطبيق التنسيق المطلوب (حجم الخط 14، حدود شباك، تلوين رصاصي وأبيض)
       buffer_kpi = BytesIO()
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
         final_kpi_table.to_excel(writer, index=False, sheet_name="KPI_Report")
         wb = writer.book
         ws = wb["KPI_Report"]
 
+        # الأنماط المطلوبة
         header_font = Font(
             name="Calibri", size=14, bold=True, color="FFFFFF"
         )
