@@ -65,4 +65,7 @@ def load_wallet_from_db():
                 "details": "التفاصيل / الجهة / السبب",
                 "payment_method": "طريقة الدفع",
                 "debt_status": "حالة الديون",
-                "remaining_balance": "الباقي
+                "remaining_balance": "الباقي"
+            }
+        )
+    return df
