@@ -448,7 +448,9 @@ with tab2:
           ): "ترحيل عمولات الوكالة من المتاجر المستقلة إلى الإدارة الرئيسية",
           "Auto Claw Back": "استرجاع تلقائي للأموال",
           "Commission Payment for Head Office": "دفع العمولات للإدارة الرئيسية",
-          "Commission Payment for Independent Stores": "دفع العمولات للمتاجر المستقلة",
+          "Commission Payment for Independent Stores": (
+              "دفع العمولات للمتاجر المستقلة"
+          ),
           "Commission Roll Down for Independent Store": (
               "تنزيل العمولات للمتاجر المستقلة"
           ),
@@ -629,7 +631,7 @@ with tab_kpi:
       kpi_df = pd.read_excel(kpi_uploaded_file)
       cols_list = kpi_df.columns.tolist()
 
-      # تحديد المواقع بدقة (A=0, B=1, C=2, F=5, H=7, T=19)
+      # تحديد المواقع آمنًا (A=0, B=1, C=2, F=5, H=7, T=19)
       h_idx = 7 if len(cols_list) > 7 else 0
       f_idx = 5 if len(cols_list) > 5 else 0
       c_idx = 2 if len(cols_list) > 2 else 0
@@ -656,7 +658,7 @@ with tab_kpi:
           else kpi_df.iloc[:, c_idx].astype(str).str.strip()
       )
 
-      # استخراج عمود T كنص ومعالجة القيم النصية (إزالة الفواصل، الفراغات، والرموز غير الرقمية إن وجدت)
+      # استخراج عمود T كنص ومعالجة القيم النصية
       raw_t_series = (
           kpi_df["T"].astype(str)
           if "T" in kpi_df.columns
@@ -686,7 +688,10 @@ with tab_kpi:
         # عدد العمليات لكل نوع من عمود C
         c_value_counts = grp["C_clean"].value_counts()
         for op_name, op_count in c_value_counts.items():
-          row_item[f"عدد ({op_name})"] = op_count
+          col_key = f"عدد ({op_name})"
+          if col_key not in row_item:
+            row_item[col_key] = 0
+          row_item[col_key] += op_count
 
         # فلترة عمليات business to business transfer (مطابقة غير حساسة لحالة الأحرف)
         b2b_mask = (
