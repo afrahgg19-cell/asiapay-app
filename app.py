@@ -637,31 +637,37 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (عمود G للشورت كود، F للاسم بالعربي، العمليات المحددة من B، ومبالغ B2B نصوص من T)
+# التبويب الرابع: KPI (مصحح آمن للفهارس والأسماء)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
       "Short Code (عمود G)، الاسم بالعربي (عمود F)، عد العمليات المحددة من"
-      " العمود B، ונصوص Business to Business Transfer من العمود T."
+      " العمود B، ونصوص Business to Business Transfer من العمود T."
   )
 
   kpi_uploaded_file = st.file_uploader(
       "اختر ملف الإكسل الخاص بـ KPI",
       type=["xlsx", "xls"],
-      key="kpi_tab_uploader_exact",
+      key="kpi_tab_uploader_exact_fixed_final",
   )
 
   if kpi_uploaded_file is not None:
     try:
       kpi_df = pd.read_excel(kpi_uploaded_file)
-      cols_list = kpi_df.columns.tolist()
+      cols_list = [str(c).strip() for c in kpi_df.columns.tolist()]
 
-      # مطابقة الأعمدة حسب فكرتك (G للشورت كود، F للاسم العربي، B للعمليات، T للمبالغ النصية)
-      g_col_name = "Short Code" if "Short Code" in cols_list else ("G" if "G" in cols_list else (cols_list if len(cols_list) > 6 else cols_list[0]))
-      f_col_name = "Arabic Name" if "Arabic Name" in cols_list else ("F" if "F" in cols_list else (cols_list if len(cols_list) > 5 else cols_list[0]))
-      b_col_name = "B" if "B" in cols_list else (cols_list if len(cols_list) > 1 else cols_list[0])
-      t_col_name = "T" if "T" in cols_list else (cols_list[19] if len(cols_list) > 19 else cols_list[-1])
+      def get_col_safe(preferred_name, fallback_idx):
+        if preferred_name in kpi_df.columns:
+          return preferred_name
+        if len(cols_list) > fallback_idx:
+          return cols_list[fallback_idx]
+        return cols_list[0] if cols_list else None
+
+      g_col_name = get_col_safe("Short Code", 6)
+      f_col_name = get_col_safe("Arabic Name", 5)
+      b_col_name = get_col_safe("B", 1)
+      t_col_name = get_col_safe("T", 19)
 
       work_kpi = pd.DataFrame()
       work_kpi["G_clean"] = (
@@ -752,7 +758,7 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_exact",
+          key="download_kpi_excel_exact_fixed_final",
       )
 
     except Exception as err:
