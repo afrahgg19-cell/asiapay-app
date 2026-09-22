@@ -1,10 +1,15 @@
 import pandas as pd
 import streamlit as st
 
-# إعداد الصفحة
-st.set_page_config(
-    page_title="تحليل العمليات والجرد", page_layout="wide", initial_sidebar_state="expanded"
-)
+# إعداد الصفحة (يجب أن يكون أول أمر Streamlit في الكود تماماً)
+try:
+  st.set_page_config(
+      page_title="تحليل العمليات والجرد",
+      layout="wide",
+      initial_sidebar_state="expanded",
+  )
+except Exception:
+  pass
 
 st.title("📊 نظام تحليل ومقارنة الجرد والعمليات")
 
@@ -46,18 +51,13 @@ with tab2:
   if uploaded_file_ops is not None:
     try:
       df_ops = pd.read_excel(uploaded_file_ops)
-
-      # الاعتماد على أسماء الأعمدة الظاهرة في صورتك أو الفهارس التقريبية
-      # عمود H غالباً Short Code (index 7)، عمود F عربي (index 5)، عمود C أو غيره لنوع العمليات (Reason)
-      # سنبحث عن الأعمدة بذكاء أو بالأسماء القياسية
       cols = df_ops.columns.tolist()
 
-      # تحديد الأعمدة بناءً على الظاهر في صورتك:
-      # C -> Reason, F -> Arabic Name, H -> Short Code, T -> index 19 (المبلغ المخزون كنص)
+      # تحديد الأعمدة بمرونة
       code_col = (
           "Short Code"
           if "Short Code" in df_ops.columns
-          else (cols[7] if len(cols) > 7 else cols)
+          else (cols[7] if len(cols) > 7 else cols[0])
       )
       name_col = (
           "Arabic Name"
@@ -67,17 +67,17 @@ with tab2:
       reason_col = (
           "Reason 1"
           if "Reason 1" in df_ops.columns
-          else ("Reason" if "Reason" in df_ops.columns else cols)
+          else ("Reason" if "Reason" in df_ops.columns else cols[0])
       )
 
-      # معالجة العمود T (ترتيبه 20 في الإكسل أي index 19، أو البحث بحرف T/المبلغ)
+      # معالجة العمود T (ترتيبه 20 في الإكسل أي index 19)
       t_col_idx = 19
       t_col = (
           cols[t_col_idx]
           if len(cols) > t_col_idx
           else next(
               (c for c in cols if "t" in str(c).lower() or "amount" in str(c).lower()),
-              cols,
+              cols[0],
           )
       )
 
@@ -98,7 +98,7 @@ with tab2:
       else:
         df_ops["Cleaned_T_Amount"] = 0.0
 
-      # ربط ثابث لاسم Short Code بالاسم العربي
+      # ربط ثابت لاسم Short Code بالاسم العربي
       mapping_names = (
           df_ops.groupby(code_col)[name_col].first().to_dict()
           if code_col in df_ops.columns and name_col in df_ops.columns
@@ -106,7 +106,7 @@ with tab2:
       )
       df_ops["الاسم_العربي_الموحد"] = df_ops[code_col].map(mapping_names)
 
-      # خيار استثناء عملية معينة إذا رغبت (مثل العملية الثالثة أو أي نوع محدد من قائمة Reason)
+      # خيار استثناء عملية معينة إذا رغبت
       unique_reasons = (
           df_ops[reason_col].dropna().unique().tolist()
           if reason_col in df_ops.columns
@@ -116,9 +116,10 @@ with tab2:
           "اختر أنواع العمليات المراد استثناؤها (إن وجدت):",
           options=unique_reasons,
           default=[],
+          key="ex_reasons_tab2",
       )
 
-      if excluded_reasons:
+      if excluded_reasons and reason_col in df_ops.columns:
         df_ops = df_ops[~df_ops[reason_col].isin(excluded_reasons)]
 
       # حساب عدد العمليات لكل Short Code ونوع العملية
@@ -169,6 +170,7 @@ with tab2:
               mime=(
                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               ),
+              key="download_btn_ops",
           )
       else:
         st.error("لم يتم العثور على أعمدة Short Code أو Reason المطلوبة بدقة.")
