@@ -4,12 +4,10 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
-# إعدادات الصفحة
 st.set_page_config(
     page_title="نظام إدارة المحفظة المالية الكبرى - ASIA PAY", layout="wide"
 )
 
-# --- لوحة التحكم في الأعلى ---
 st.markdown(
     "<h2 style='text-align: center; color: #1E3A8A;'>💰 نظام إدارة المحفظة"
     " المالية - ASIA PAY</h2>",
@@ -23,7 +21,6 @@ tab1, tab2, tab3, tab_kpi = st.tabs([
     "📈 KPI",
 ])
 
-# --- قاعدة بيانات SQLite للمحفظة ---
 DB_FILE = "asia_pay_wallet.db"
 
 
@@ -93,7 +90,6 @@ def get_latest_balance():
   return row[0] if row else 0.0
 
 
-# تنظيف الشورت كود لإزالة .0 أو المسافات
 def clean_code(val):
   if pd.isna(val):
     return ""
@@ -333,13 +329,13 @@ with tab_kpi:
   col_k1, col_k2 = st.columns(2)
   with col_k1:
     kpi_uploaded_file = st.file_uploader(
-        "ملف الإكسل الرئيسي", type=["xlsx", "xls"], key="kpi_main_single_v9"
+        "ملف الإكسل الرئيسي", type=["xlsx", "xls"], key="kpi_main_single_v10"
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
         "ملف المندوبين (اختياري)",
         type=["xlsx", "xls"],
-        key="kpi_rep_single_v9",
+        key="kpi_rep_single_v10",
     )
 
   if kpi_uploaded_file is not None:
@@ -348,7 +344,6 @@ with tab_kpi:
       sheet_names = excel_file_obj.sheet_names
       kpi_df = pd.read_excel(excel_file_obj, sheet_name=sheet_names[0])
 
-      # البحث عن شيت wallet report / transaction report
       wallet_report_sheet_name = None
       for s_name in sheet_names:
         l_name = str(s_name).lower()
@@ -383,7 +378,11 @@ with tab_kpi:
       b_col_name = (
           "B"
           if "B" in kpi_df.columns
-          else (kpi_df.columns if len(kpi_df.columns) > 1 else kpi_df.columns[0])
+          else (
+              kpi_df.columns
+              if len(kpi_df.columns) > 1
+              else kpi_df.columns[0]
+          )
       )
       t_col_name = (
           "T"
@@ -391,7 +390,7 @@ with tab_kpi:
           else (
               kpi_df.columns[19]
               if len(kpi_df.columns) > 19
-              else kpi_df.columns[0]
+              else kpi_df.columns[-1]
           )
       )
 
@@ -439,7 +438,7 @@ with tab_kpi:
               else w_rep_df.columns[-1]
           )
           e_col = (
-              w_rep_df.columns[4]
+              w_rep_df.columns
               if len(w_rep_df.columns) > 4
               else w_rep_df.columns[0]
           )
@@ -518,7 +517,6 @@ with tab_kpi:
               g_clean_str, "غير محدد"
           )
 
-        # إضافة عمود Organization E-Money Account في مكان واضح متقدم
         e_val_raw = e_money_map.get(g_clean_str, 0.0)
         row_item["Organization E-Money Account"] = f"{e_val_raw:,.2f}"
 
