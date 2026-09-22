@@ -609,13 +609,13 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (عمود H للكود، F للاسم، أعداد العمليات من C، و B2B كنص من T)
+# التبويب الرابع: KPI (عمود H للكود، F للاسم، أعداد العمليات من C، و B2B تحويل من T إلى أرقام)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
       "تجميع Short Code (عمود H)، الاسم بالعربي (عمود F)، عد العمليات"
-      " من عمود C، واستخراج مبلغ business to business transfer كنص من عمود T."
+      " من عمود C، واستخراج وتحويل مبالغ business to business transfer من عمود T إلى أرقام."
   )
 
   kpi_uploaded_file = st.file_uploader(
@@ -655,11 +655,24 @@ with tab_kpi:
           if "C" in kpi_df.columns
           else kpi_df.iloc[:, c_idx].astype(str).str.strip()
       )
-      work_kpi["T_text"] = (
-          kpi_df["T"].astype(str).str.strip()
+
+      # استخراج عمود T كنص ومعالجة القيم النصية (إزالة الفواصل، الفراغات، والرموز غير الرقمية إن وجدت)
+      raw_t_series = (
+          kpi_df["T"].astype(str)
           if "T" in kpi_df.columns
-          else kpi_df.iloc[:, t_idx].astype(str).str.strip()
+          else kpi_df.iloc[:, t_idx].astype(str)
       )
+      work_kpi["T_text"] = raw_t_series.str.strip()
+
+      # تحويل النصوص في عمود T إلى قيم رقمية بدقة (مع التعامل مع الفواصل الآلاف)
+      cleaned_t_numeric = (
+          work_kpi["T_text"]
+          .str.replace(",", "", regex=False)
+          .str.replace(" ", "", regex=False)
+      )
+      work_kpi["T_num"] = pd.to_numeric(
+          cleaned_t_numeric, errors="coerce"
+      ).fillna(0.0)
 
       kpi_rows_list = []
       for (h_v, f_v), grp in work_kpi.groupby(
@@ -669,20 +682,32 @@ with tab_kpi:
             "Short Code (H)": h_v,
             "Arabic Name (F)": f_v,
         }
+
         # عدد العمليات لكل نوع من عمود C
         c_value_counts = grp["C_clean"].value_counts()
         for op_name, op_count in c_value_counts.items():
           row_item[f"عدد ({op_name})"] = op_count
 
-        # لعمليات business to business transfer، أخذ الـ amount كنص من عمود T
+        # فلترة عمليات business to business transfer (مطابقة غير حساسة لحالة الأحرف)
         b2b_mask = (
             grp["C_clean"]
             .str.lower()
             .str.contains("business to business transfer", na=False)
         )
-        b2b_text_vals = grp.loc[b2b_mask, "T_text"].tolist()
-        row_item["B2B_Amount_Text_from_T"] = (
-            " | ".join(b2b_text_vals) if b2b_text_vals else "لا يوجد"
+
+        # جمع الأرقام المحولة من عمود T لهذه الصفوف
+        b2b_total_num = grp.loc[b2b_mask, "T_num"].sum()
+
+        # الاحتفاظ بالنصوص الأصلية للمقارنة أو العرض
+        b2b_texts = [
+            t
+            for t in grp.loc[b2b_mask, "T_text"].tolist()
+            if str(t).lower() not in ["nan", "none", "", "nat"]
+        ]
+
+        row_item["مجموع مبالغ B2B (رقمي محول من T)"] = b2b_total_num
+        row_item["نصوص B2B الأصلية (T)"] = (
+            " | ".join(b2b_texts) if b2b_texts else "لا يوجد"
         )
 
         kpi_rows_list.append(row_item)
