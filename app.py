@@ -609,13 +609,13 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (عمود H للكود، F للاسم، أعداد العمليات، و B2B كنص من عمود T)
+# التبويب الرابع: KPI (عمود H للكود، F للاسم، أعداد العمليات من C، و B2B كنص من T)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
       "تجميع Short Code (عمود H)، الاسم بالعربي (عمود F)، عد العمليات"
-      " بالأعداد، واستخراج مبلغ business to business transfer كنص من عمود T."
+      " من عمود C، واستخراج مبلغ business to business transfer كنص من عمود T."
   )
 
   kpi_uploaded_file = st.file_uploader(
@@ -629,6 +629,7 @@ with tab_kpi:
       kpi_df = pd.read_excel(kpi_uploaded_file)
       cols_list = kpi_df.columns.tolist()
 
+      # تحديد الأعمدة بدقة حسب H (index 7 أو عمود H), F (index 5 أو Arabic Name/F), C (index 2 أو العمود الثالث), T (index 19)
       h_c = (
           "H"
           if "H" in kpi_df.columns
@@ -643,17 +644,11 @@ with tab_kpi:
               else (cols_list[5] if len(cols_list) > 5 else cols_list[0])
           )
       )
-      b_c = (
-          next(
-              (
-                  c
-                  for c in cols_list
-                  if str(c).lower() in ["reason type", "b", "type", "operation"]
-              ),
-              cols_list[0],
-          )
-          if len(cols_list) > 0
-          else None
+      # قراءة عمليات عمود C (index 2 أو العمود المسمى C)
+      c_col = (
+          "C"
+          if "C" in kpi_df.columns
+          else (cols_list if len(cols_list) > 2 else cols_list[0])
       )
       t_c = (
           cols_list[19]
@@ -666,9 +661,7 @@ with tab_kpi:
       work_kpi = kpi_df.copy()
       work_kpi["H_clean"] = work_kpi[h_c].astype(str).str.strip()
       work_kpi["F_clean"] = work_kpi[f_c].astype(str).str.strip()
-      work_kpi["B_clean"] = (
-          work_kpi[b_c].astype(str).str.strip() if b_c in work_kpi.columns else ""
-      )
+      work_kpi["C_clean"] = work_kpi[c_col].astype(str).str.strip()
       work_kpi["T_text"] = work_kpi[t_c].astype(str).str.strip()
 
       kpi_rows_list = []
@@ -679,14 +672,14 @@ with tab_kpi:
             "Short Code (H)": h_v,
             "Arabic Name (F)": f_v,
         }
-        # عدد العمليات لكل نوع (باستثناء B2B) أو كعداد عام
-        b_value_counts = grp["B_clean"].value_counts()
-        for op_name, op_count in b_value_counts.items():
+        # عدد العمليات لكل نوع من عمود C
+        c_value_counts = grp["C_clean"].value_counts()
+        for op_name, op_count in c_value_counts.items():
           row_item[f"عدد ({op_name})"] = op_count
 
         # لعمليات business to business transfer، أخذ الـ amount كنص من عمود T
         b2b_mask = (
-            grp["B_clean"]
+            grp["C_clean"]
             .str.lower()
             .str.contains("business to business transfer", na=False)
         )
