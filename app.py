@@ -17,15 +17,20 @@ st.markdown(
 )
 
 
-# دالة مساعدة لتنظيف الأعمدة النصية أو الرقمية التي تظهر بصيغة .0 مزعجة
-def clean_trailing_zeros(df_target):
+# دالة مساعدة لتنظيف أعمدة (تل المكتب / Short Code) فقط
+def clean_office_code_column(df_target):
   if df_target is None or df_target.empty:
     return df_target
   df_clean = df_target.copy()
   for col in df_clean.columns:
     col_str_lower = str(col).lower()
-    # التحقق من الأعمدة التي قد تحمل اسم "تل" أو تظهر بها قيم عشرية .0
-    if "تل" in str(col) or "code" in col_str_lower or "g_clean" in col_str_lower:
+    # الاستهداف الدقيق لأعمدة التل أو الـ short code فقط
+    if (
+        "تل" in str(col)
+        or "short code" in col_str_lower
+        or "g_clean" in col_str_lower
+        or "code" in col_str_lower
+    ):
       df_clean[col] = (
           df_clean[col]
           .astype(str)
@@ -35,12 +40,12 @@ def clean_trailing_zeros(df_target):
   return df_clean
 
 
-# استخدام الـ Tabs الأربعة العلوية
+# استخدام الـ Tabs (4 تبويبات)
 tab1, tab2, tab3, tab_kpi = st.tabs([
     "💳 محفظة ASIA PAY",
     "📊 المقارنة بين شهرين",
     "⭐ نسبة الإنجاز",
-    "📈 KPI",
+    "📈 KPI والأرصدة",
 ])
 
 # --- قاعدة بيانات SQLite للمحفظة ---
@@ -98,7 +103,7 @@ def load_wallet_from_db():
             "الباقي في المحفظة",
         ]
     )
-  return clean_trailing_zeros(df)
+  return clean_office_code_column(df)
 
 
 def get_latest_balance():
@@ -532,8 +537,8 @@ with tab2:
           fill_value=0,
       ).reset_index()
 
-      st.session_state["pivot_result"] = clean_trailing_zeros(pivot_result)
-      st.session_state["combined_df"] = clean_trailing_zeros(combined_df)
+      st.session_state["pivot_result"] = clean_office_code_column(pivot_result)
+      st.session_state["combined_df"] = clean_office_code_column(combined_df)
 
       st.success("✅ تمت معالجة وحفظ المقارنة بين الشهرين بنجاح!")
 
@@ -582,7 +587,7 @@ with tab3:
       st.session_state["combined_df"] is not None
       and not st.session_state["combined_df"].empty
   ):
-    df_combined = clean_trailing_zeros(st.session_state["combined_df"])
+    df_combined = clean_office_code_column(st.session_state["combined_df"])
 
     code_col = (
         "Short Code"
@@ -639,7 +644,7 @@ with tab3:
           "النقاط المكتسبة",
       ]] = perf_summary.apply(calc_performance_and_progress, axis=1)
 
-      st.session_state["perf_summary"] = clean_trailing_zeros(perf_summary)
+      st.session_state["perf_summary"] = clean_office_code_column(perf_summary)
       st.success("✅ تم احتساب نسبة الإنجاز والتقييم للمكاتب!")
       st.dataframe(perf_summary, use_container_width=True)
 
@@ -654,13 +659,13 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (دمج جميع أعمدة الإكسل الاختياري عبر Short Code)
+# التبويب الرابع: KPI + دمج عمود رصيد المحفظة من الشيت الثاني
 # ====================================================
 with tab_kpi:
-  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
+  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة من الشيت الثاني")
   st.write(
-      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع الإكسل الاختياري (سيتم"
-      " دمج جميع أعمدته مباشرة عبر Short Code)."
+      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع الشيت الثاني (يحتوي على"
+      " Short Code وعمود رصيد المحفظة / أي أعمدة إضافية)."
   )
 
   col_k1, col_k2 = st.columns(2)
@@ -668,13 +673,13 @@ with tab_kpi:
     kpi_uploaded_file = st.file_uploader(
         "اختر ملف الإكسل الخاص بالحركات (KPI)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_merged_v8",
+        key="kpi_main_file_merged_v9",
     )
   with col_k2:
     opt_uploaded_file = st.file_uploader(
-        "اختر الإكسل الاختياري (يحتوي على Short Code وأي بيانات إضافية)",
+        "اختر الشيت الثاني (يحتوي على Short Code ورصيد المحفظة)",
         type=["xlsx", "xls"],
-        key="kpi_opt_file_merged_v8",
+        key="kpi_opt_file_merged_v9",
     )
 
   if kpi_uploaded_file is not None:
@@ -695,15 +700,13 @@ with tab_kpi:
       t_col_name = get_col_safe("T", 19, kpi_df)
 
       work_kpi = pd.DataFrame()
-      # تنظيف عام لإزالة .0 من الـ Short Code أو الأعمدة الرقمية
-      work_kpi["G_clean"] = (
-          kpi_df[g_col_name]
-          .astype(str)
-          .str.strip()
-          .str.replace(r"\.0$", "", regex=True)
+      raw_g_series = (
+          kpi_df[g_col_name].astype(str).str.strip()
           if g_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
+      work_kpi["G_clean"] = raw_g_series.str.replace(r"\.0$", "", regex=True)
+
       work_kpi["F_clean"] = (
           kpi_df[f_col_name].astype(str).str.strip()
           if f_col_name in kpi_df.columns
@@ -729,7 +732,7 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # --- قراءة الإكسل الاختياري واستخراج كافة الأعمدة غير الـ Short Code ---
+      # --- قراءة الشيت الثاني وربط أعمدته (بضمنها رصيد المحفظة) عبر Short Code ---
       has_opt_file = opt_uploaded_file is not None
       opt_lookup = {}
       opt_extra_cols = []
@@ -748,6 +751,15 @@ with tab_kpi:
 
           opt_extra_cols = [c for c in opt_df.columns if c != opt_code_col]
 
+          def clean_bal_opt(val):
+            if pd.isna(val):
+              return 0.0
+            val_s = str(val).replace(",", "").replace(" ", "").strip()
+            try:
+              return float(val_s)
+            except:
+              return val
+
           for _, rrow in opt_df.iterrows():
             c_key = (
                 str(rrow[opt_code_col]).strip().replace(".0", "")
@@ -756,16 +768,20 @@ with tab_kpi:
             )
             opt_lookup[c_key] = {
                 ec: (
-                    str(rrow[ec]).replace(".0", "")
-                    if pd.notna(rrow[ec]) and str(rrow[ec]).endswith(".0")
+                    clean_bal_opt(rrow[ec])
+                    if "balance" in str(ec).lower()
+                    or "رصيد" in str(ec).lower()
                     else (rrow[ec] if pd.notna(rrow[ec]) else "")
                 )
                 for ec in opt_extra_cols
             }
-          st.success("✅ تم قراءة الإكسل الاختياري ودمج أعمدته بنجاح.")
+          st.success(
+              "✅ تم قراءة الشيت الثاني وربط أعمدة الأرصدة والبيانات عبر"
+              " Short Code."
+          )
         except Exception as e_opt:
           st.warning(
-              f"⚠️تعذر قراءة الإكسل الاختياري، سيتم المتابعة بدونه: {e_opt}"
+              f"⚠️تعذر قراءة الشيت الثاني، سيتم المتابعة بدونه: {e_opt}"
           )
           has_opt_file = False
           opt_extra_cols = []
@@ -790,13 +806,13 @@ with tab_kpi:
             "Short Code (G)": g_clean_str,
         }
 
-        # حقن جميع أعمدة الملف الاختياري المطبقة على Short Code
+        # حقن جميع أعمدة الشيت الثاني (بضمنها رصيد المحفظة) المطبقة على Short Code
         if has_opt_file:
           if g_clean_str in opt_lookup:
             row_item.update(opt_lookup[g_clean_str])
           else:
             for ec in opt_extra_cols:
-              row_item[ec] = ""
+              row_item[ec] = 0.0 if "balance" in str(ec).lower() else ""
 
         row_item["Arabic Name (F)"] = f_v
 
@@ -833,13 +849,15 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      final_kpi_table = clean_trailing_zeros(final_kpi_table)
+      final_kpi_table = clean_office_code_column(final_kpi_table)
 
-      st.subheader("📋 نتيجة تقرير الـ KPI (مدمج مع الإكسل الاختياري)")
+      st.subheader(
+          "📋 نتيجة تقرير الـ KPI (مدمج معه عمود رصيد المحفظة من الشيت الثاني)"
+      )
       st.dataframe(final_kpi_table, use_container_width=True)
 
       out_kpi_name = (
-          "KPI_Report_Merged_Optional.xlsx"
+          "KPI_Report_Merged_WalletBalance.xlsx"
           if has_opt_file
           else "KPI_Report_Standard.xlsx"
       )
@@ -857,13 +875,13 @@ with tab_kpi:
       buffer_kpi.seek(0)
 
       st.download_button(
-          label="📥 تحميل تقرير KPI نهائي مدمج (Excel)",
+          label="📥 تحميل تقرير KPI نهائي مدمج مع الأرصدة (Excel)",
           data=buffer_kpi,
           file_name=out_kpi_name,
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_optional_merge_v8",
+          key="download_kpi_excel_optional_merge_v9",
       )
 
     except Exception as err:
