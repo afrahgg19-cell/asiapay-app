@@ -183,7 +183,7 @@ with tab1:
       else 0.0
   )
 
-  col1, col2, col3 = st.columns(3)
+  col1, col2, col3, col_target = st.columns(4)
   with col1:
     st.metric(
         label="الرصيد (الفعلي) الحالي في المحفظة", value=f"{last_balance:,.2f} د.ع"
@@ -196,6 +196,23 @@ with tab1:
     st.metric(
         label="إجمالي عدد الحركات المسجلة",
         value=str(len(df)) if not df.empty else "0",
+    )
+  with col_target:
+    deposit_target_val = st.number_input(
+        "🎯 تاركت الإيداع (Target)",
+        value=st.session_state.get("deposit_target_val", 10000000.0),
+        step=500000.0,
+        format="%.2f",
+        key="deposit_target_input",
+    )
+    st.session_state["deposit_target_val"] = deposit_target_val
+    dep_progress = (
+        (total_deposit / deposit_target_val) * 100.0
+        if deposit_target_val > 0
+        else 0.0
+    )
+    st.metric(
+        label="نسبة إنجاز الإيداعات من التاركت", value=f"{dep_progress:,.2f}%"
     )
 
   st.markdown("---")
