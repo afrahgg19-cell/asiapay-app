@@ -1,6 +1,7 @@
 from io import BytesIO
 import os
 import sqlite3
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -635,32 +636,52 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون + عدد الحركات > 4999)
+# التبويب الرابع: KPI (مع المندوبين + عمودي Done + عمود رصيد المحفظة المفلتر عمود H و R)
 # ====================================================
 with tab_kpi:
-  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
+  st.markdown("### 📈 لوحة مؤشرات الأداء (KPI) + رصيد المحفظة المفلتر")
   st.write(
-      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع ملف المندوبين (اختياري"
-      " لربط الأسماء تلقائياً بالاعتماد على Short Code)."
+      "1. رفـع ملف الحركات الأساسي (KPI).\n2. رفـع ملف المندوبين (اختياري).\n3."
+      " رفع ملف المحفظة (Wallet) لاستخراج رصيد Organization E-Money"
+      " Account."
   )
 
-  col_k1, col_k2 = st.columns(2)
+  col_k1, col_k2, col_k3 = st.columns(3)
   with col_k1:
     kpi_uploaded_file = st.file_uploader(
         "اختر ملف الإكسل الخاص بالحركات (KPI)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_final_v5",
+        key="kpi_main_file_final_v6",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
-        "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
+        "اختر ملف المندوبين (اختياري)",
         type=["xlsx", "xls"],
-        key="kpi_rep_file_final_v5",
+        key="kpi_rep_file_final_v6",
+    )
+  with col_k3:
+    wallet_filtered_file = st.file_uploader(
+        "اختر ملف المحفظة (Wallet لاستخراج عمود R)",
+        type=["xlsx", "xls"],
+        key="kpi_wallet_file_final_v6",
     )
 
   if kpi_uploaded_file is not None:
     try:
       kpi_df = pd.read_excel(kpi_uploaded_file)
+
+      # --- قراءة shortCode من العمود E (الفهرس 4) أو بالاسم ---
+      g_col_name = None
+      for col in kpi_df.columns:
+        if str(col).strip().lower() in [
+            "shortcode",
+            "short code",
+            "short_code",
+        ]:
+          g_col_name = col
+          break
+      if not g_col_name and len(kpi_df.columns) > 4:
+        g_col_name = kpi_df.columns[4]  # العمود E (index 4)
 
       def get_col_safe(preferred_name, fallback_idx, df_target):
         if preferred_name in df_target.columns:
@@ -670,7 +691,6 @@ with tab_kpi:
           return df_target.columns[fallback_idx]
         return df_target.columns[0] if len(cols_local) > 0 else None
 
-      g_col_name = get_col_safe("Short Code", 6, kpi_df)
       f_col_name = get_col_safe("Arabic Name", 5, kpi_df)
       b_col_name = get_col_safe("B", 1, kpi_df)
       t_col_name = get_col_safe("T", 19, kpi_df)
@@ -706,10 +726,9 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # فحص هل تم رفع ملف المندوبين؟
+      # --- ربط المندوبين إن توفر ---
       has_rep_file = rep_uploaded_file is not None
       rep_map_dict = {}
-
       if has_rep_file:
         try:
           rep_df = pd.read_excel(rep_uploaded_file)
@@ -730,7 +749,6 @@ with tab_kpi:
                 or "اسم" in str(col)
             ):
               rep_name_col = col
-
           if not rep_code_col and len(rep_df.columns) > 0:
             rep_code_col = rep_df.columns[0]
           if not rep_name_col and len(rep_df.columns) > 1:
@@ -741,12 +759,85 @@ with tab_kpi:
               c_val = str(rrow[rep_code_col]).strip()
               n_val = str(rrow[rep_name_col]).strip()
               rep_map_dict[c_val] = n_val
-          st.success("✅ تم ربط أسماء المندوبين بنجاح.")
-        except Exception as e_rep:
-          st.warning(
-              f"⚠️تعذر قراءة ملف المندوبين، سيتم الاستمرار بدونهم: {e_rep}"
+        except Exception:
+          pass
+
+      # --- معالجة شيت المحفظة (فلترة عمود H على Organization E-Money Account وتنظيف عمود R) ---
+      wallet_balance_map = {}
+      if wallet_filtered_file is not None:
+        try:
+          w_df = pd.read_excel(wallet_filtered_file)
+
+          # عمود H (index 7 أو اسم accountType)
+          h_col_w = (
+              "accountType"
+              if "accountType" in w_df.columns
+              else (w_df.columns[7] if len(w_df.columns) > 7 else None)
           )
-          has_rep_file = False
+          # عمود R (index 17 أو اسم balance)
+          r_col_w = (
+              "balance"
+              if "balance" in w_df.columns
+              else (w_df.columns[17] if len(w_df.columns) > 17 else None)
+          )
+          # عمود الكود في المحفظة (العمود E index 4 أو مشابه)
+          w_code_col = None
+          for col in w_df.columns:
+            if str(col).strip().lower() in [
+                "shortcode",
+                "short code",
+                "short_code",
+            ]:
+              w_code_col = col
+              break
+          if not w_code_col and len(w_df.columns) > 4:
+            w_code_col = w_df.columns[4]
+
+          if h_col_w and r_col_w and w_code_col:
+            # فلترة H == 'Organization E-Money Account'
+            mask_h = (
+                w_df[h_col_w].astype(str).str.strip()
+                == "Organization E-Money Account"
+            )
+            filtered_w = w_df[mask_h].copy()
+
+            def clean_balance_val(val):
+              if pd.isna(val):
+                return 0.0
+              s = str(val).strip()
+              if not s:
+                return 0.0
+              neg = False
+              if s.startswith("(") and s.endswith(")"):
+                neg = True
+                s = s[1:-1].strip()
+              s = s.replace(",", "")
+              try:
+                num = float(s)
+                return -num if neg else num
+              except ValueError:
+                return val  # بقاء النص نفسه إذا لم يكن رقماً
+
+            filtered_w["cleaned_R"] = filtered_w[r_col_w].apply(
+                clean_balance_val
+            )
+
+            # تجميع الأرقام أو أخذ القيم للـ shortCode
+            num_mask = filtered_w["cleaned_R"].apply(
+                lambda x: isinstance(x, (int, float, np.number))
+            )
+            num_grouped = (
+                filtered_w[num_mask]
+                .groupby(filtered_w[w_code_col].astype(str).str.strip())[
+                    "cleaned_R"
+                ]
+                .sum()
+                .to_dict()
+            )
+            wallet_balance_map = num_grouped
+          st.success("✅ تمت معالجة ملف المحفظة وعمود R بنجاح.")
+        except Exception as e_w:
+          st.warning(f"⚠️ تحذير أثناء قراءة ملف المحفظة: {e_w}")
 
       target_ops = [
           "Merchant Payment",
@@ -773,6 +864,11 @@ with tab_kpi:
 
         row_item["Arabic Name (F)"] = f_v
 
+        # إضافة عمود رصيد المحفظة المستخرج من عمود R المفلتر
+        g_str_key = str(g_v).strip()
+        wallet_val = wallet_balance_map.get(g_str_key, "لا توجد مطابقة")
+        row_item["رصيد المحفظة (عمود R المفلتر)"] = wallet_val
+
         for op in target_ops:
           count_val = grp["B_clean"].str.lower() == op.lower()
           row_item[f"عدد ({op})"] = int(count_val.sum())
@@ -789,7 +885,7 @@ with tab_kpi:
         )
         row_item["مجموع مبالغ Business to Business Transfer"] = formatted_b2b
 
-        # --- إضافة عمودي شروط B2B للـ 100 ألف والـ 3 مليون ---
+        # عمود شروط B2B للـ 100 ألف والـ 3 مليون
         row_item["حركه ال100 الف"] = (
             "Done" if total_b2b_sum > 99000 else ""
         )
@@ -797,7 +893,7 @@ with tab_kpi:
             "Done" if total_b2b_sum > 2999000 else ""
         )
 
-        # --- شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done) ---
+        # شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done)
         high_t_count = int((grp["T_num"] > 4999).sum())
         row_item["عدد الحركات > 4999 (4+)"] = (
             "Done" if high_t_count >= 4 else ""
@@ -806,14 +902,10 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI")
+      st.subheader("📋 نتيجة تقرير الـ KPI المحدث مع عمود المحفظة")
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = (
-          "KPI_Report_With_Reps.xlsx"
-          if has_rep_file
-          else "KPI_Report_Standard.xlsx"
-      )
+      out_kpi_name = "KPI_Report_Final_With_Wallet.xlsx"
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
@@ -828,13 +920,12 @@ with tab_kpi:
       buffer_kpi.seek(0)
 
       st.download_button(
-          label="📥 تحميل تقرير KPI نهائي (Excel)",
+          label="📥 تحميل تقرير KPI النهائي (Excel)",
           data=buffer_kpi,
           file_name=out_kpi_name,
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_ultimate_final_v5",
       )
 
     except Exception as err:
