@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import pandas as pd
 import streamlit as st
 
@@ -21,8 +22,31 @@ tab1, tab2, tab3 = st.tabs([
     "⭐ نسب الأداء ونسب الإنجاز والنقاط",
 ])
 
-# تحديد اسم ملف البيانات المحلي للمحفظة
-DATA_FILE = "wallet_data_v4.csv"
+# اسم قاعدة البيانات المحلية SQLite للمحفظة
+DB_FILE = "wallet_database.db"
+
+
+def init_db():
+  conn = sqlite3.connect(DB_FILE)
+  cursor = conn.cursor()
+  cursor.execute("""
+        CREATE TABLE IF NOT EXISTS wallet_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT,
+            operation_type TEXT,
+            amount REAL,
+            details TEXT,
+            payment_method TEXT,
+            debt_status TEXT,
+            remaining_balance REAL
+        )
+    """)
+  conn.commit()
+  conn.close()
+
+
+init_db()
+
 
 # --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
 if "pivot_result" not in st.session_state:
@@ -33,34 +57,25 @@ if "perf_summary" not in st.session_state:
   st.session_state["perf_summary"] = None
 
 
-# دالة تحميل البيانات بأمان للمحفظة
+# دالة تحميل البيانات بأمان للمحفظة من SQLite
 def load_data():
   try:
-    if os.path.exists(DATA_FILE):
-      df = pd.read_csv(DATA_FILE)
-    else:
-      raise FileNotFoundError()
-    expected_columns = [
-        "التاريخ",
-        "نوع العملية",
-        "المبلغ",
-        "التفاصيل / الجهة / السبب",
-        "طريقة الدفع",
-        "حالة الديون",
-        "الباقي في المحفظة",
-    ]
-    for col in expected_columns:
-      if col not in df.columns:
-        if col == "طريقة الدفع":
-          df[col] = "كاش"
-        elif col == "حالة الديون":
-          df[col] = "لا توجد"
-        else:
-          df[col] = []
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query(
+        "SELECT id, date as 'التاريخ', operation_type as 'نوع العملية', amount as"
+        " 'المبلغ', details as 'التفاصيل / الجهة / السبب', payment_method as"
+        " 'طريقة الدفع', debt_status as 'حالة الديون', remaining_balance as"
+        " 'الباقي في المحفظة' FROM wallet_operations ORDER BY id ASC",
+        conn,
+    )
+    conn.close()
+    if df.empty:
+      raise ValueError()
     return df
   except Exception:
     return pd.DataFrame(
         columns=[
+            "id",
             "التاريخ",
             "نوع العملية",
             "المبلغ",
@@ -104,7 +119,11 @@ with tab1:
   with col3:
     st.metric(
         label="إجمالي عدد الحركات المسجلة",
-        value=str(len(df)) if not df.empty else "0",
+        value=(
+            str(len(df[df["id"].notna()]))
+            if not df.empty and "id" in df.columns
+            else str(len(df))
+        ),
     )
 
   st.markdown("---")
@@ -131,17 +150,25 @@ with tab1:
               else 0.0
           )
           new_bal = current_bal + deposit_amount
-          new_row = pd.DataFrame([{
-              "التاريخ": str(pd.Timestamp.now()),
-              "نوع العملية": "إيداع للمحفظة",
-              "المبلغ": deposit_amount,
-              "التفاصيل / الجهة / السبب": deposit_reason,
-              "طريقة الدفع": "إيداع",
-              "حالة الديون": "لا توجد",
-              "الباقي في المحفظة": new_bal,
-          }])
-          df = pd.concat([df, new_row], ignore_index=True)
-          df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+          conn = sqlite3.connect(DB_FILE)
+          cur = conn.cursor()
+          cur.execute(
+              """
+                        INSERT INTO wallet_operations (date, operation_type, amount, details, payment_method, debt_status, remaining_balance)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+              (
+                  str(pd.Timestamp.now()),
+                  "إيداع للمحفظة",
+                  deposit_amount,
+                  deposit_reason,
+                  "إيداع",
+                  "لا توجد",
+                  new_bal,
+              ),
+          )
+          conn.commit()
+          conn.close()
           st.success("تم حفظ الإيداع وتحديث الرصيد بنجاح!")
           st.rerun()
         else:
@@ -178,17 +205,25 @@ with tab1:
               if payment_method == "مديونية (دين)"
               else "مكتمل"
           )
-          new_row = pd.DataFrame([{
-              "التاريخ": str(pd.Timestamp.now()),
-              "نوع العملية": "سحب كاش",
-              "المبلغ": withdraw_amount,
-              "التفاصيل / الجهة / السبب": withdraw_reason,
-              "طريقة الدفع": payment_method,
-              "حالة الديون": debt_status,
-              "الباقي في المحفظة": new_bal,
-          }])
-          df = pd.concat([df, new_row], ignore_index=True)
-          df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+          conn = sqlite3.connect(DB_FILE)
+          cur = conn.cursor()
+          cur.execute(
+              """
+                        INSERT INTO wallet_operations (date, operation_type, amount, details, payment_method, debt_status, remaining_balance)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+              (
+                  str(pd.Timestamp.now()),
+                  "سحب كاش",
+                  withdraw_amount,
+                  withdraw_reason,
+                  payment_method,
+                  debt_status,
+                  new_bal,
+              ),
+          )
+          conn.commit()
+          conn.close()
           st.success("تم حفظ السحب وتحديث الرصيد بنجاح!")
           st.rerun()
         else:
@@ -215,17 +250,25 @@ with tab1:
               else 0.0
           )
           new_bal = current_bal + return_amount
-          new_row = pd.DataFrame([{
-              "التاريخ": str(pd.Timestamp.now()),
-              "نوع العملية": "استرجاع للمحفظة",
-              "المبلغ": return_amount,
-              "التفاصيل / الجهة / السبب": return_reason,
-              "طريقة الدفع": "استرجاع",
-              "حالة الديون": "لا توجد",
-              "الباقي في المحفظة": new_bal,
-          }])
-          df = pd.concat([df, new_row], ignore_index=True)
-          df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+          conn = sqlite3.connect(DB_FILE)
+          cur = conn.cursor()
+          cur.execute(
+              """
+                        INSERT INTO wallet_operations (date, operation_type, amount, details, payment_method, debt_status, remaining_balance)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+              (
+                  str(pd.Timestamp.now()),
+                  "استرجاع للمحفظة",
+                  return_amount,
+                  return_reason,
+                  "استرجاع",
+                  "لا توجد",
+                  new_bal,
+              ),
+          )
+          conn.commit()
+          conn.close()
           st.success("تم استرجاع المبلغ وإضافته للمحفظة بنجاح!")
           st.rerun()
         else:
@@ -234,70 +277,105 @@ with tab1:
   st.markdown("---")
   st.subheader("📋 السجل التفصيلي للعمليات")
   if not df.empty:
-    st.dataframe(df, use_container_width=True)
+    display_df = df.drop(columns=["id"]) if "id" in df.columns else df
+    st.dataframe(display_df, use_container_width=True)
 
     with st.expander("✏️ تعديل أو حذف عملية سابقة من السجل"):
-      row_indices = df.index.tolist()
-      selected_row_idx = st.selectbox(
-          "اختر رقم السجل (Index) للتعديل أو الحذف:", row_indices
-      )
+      if "id" in df.columns and not df.empty:
+        row_ids = df["id"].tolist()
+        selected_row_id = st.selectbox(
+            "اختر رقم السجل (ID) للتعديل أو الحذف:", row_ids
+        )
 
-      if selected_row_idx is not None and selected_row_idx in df.index:
-        current_row = df.loc[selected_row_idx]
-        with st.form("edit_row_form"):
-          st.write(
-              f"تعديل السجل رقم: {selected_row_idx} | التاريخ:"
-              f" {current_row['التاريخ']}"
-          )
-          new_edit_amount = st.number_input(
-              "تعديل المبلغ",
-              value=float(current_row["المبلغ"]),
-              step=1000.0,
-              format="%.2f",
-          )
-          new_edit_reason = st.text_input(
-              "تعديل التفاصيل / الجهة / السبب",
-              value=str(current_row["التفاصيل / الجهة / السبب"]),
-          )
+        if selected_row_id is not None:
+          row_matched = df[df["id"] == selected_row_id]
+          if not row_matched.empty:
+            current_row = row_matched.iloc[0]
+            with st.form("edit_row_form"):
+              st.write(
+                  f"تعديل السجل رقم ID: {selected_row_id} | التاريخ:"
+                  f" {current_row['التاريخ']}"
+              )
+              new_edit_amount = st.number_input(
+                  "تعديل المبلغ",
+                  value=float(current_row["المبلغ"]),
+                  step=1000.0,
+                  format="%.2f",
+              )
+              new_edit_reason = st.text_input(
+                  "تعديل التفاصيل / الجهة / السبب",
+                  value=str(current_row["التفاصيل / الجهة / السبب"]),
+              )
 
-          col_e1, col_e2 = st.columns(2)
-          submit_edit = col_e1.form_submit_button("💾 حفظ التعديلات")
-          submit_delete = col_e2.form_submit_button(
-              "🗑️ حذف هذا السجل نهائياً"
-          )
+              col_e1, col_e2 = st.columns(2)
+              submit_edit = col_e1.form_submit_button("💾 حفظ التعديلات")
+              submit_delete = col_e2.form_submit_button(
+                  "🗑️ حذف هذا السجل نهائياً"
+              )
 
-          if submit_edit:
-            df.loc[selected_row_idx, "المبلغ"] = new_edit_amount
-            df.loc[selected_row_idx, "التفاصيل / الجهة / السبب"] = (
-                new_edit_reason
-            )
-            running_bal = 0.0
-            for i in df.index:
-              op_type = df.loc[i, "نوع العملية"]
-              op_amt = float(df.loc[i, "المبلغ"])
-              if op_type in ["إيداع للمحفظة", "استرجاع للمحفظة"]:
-                running_bal += op_amt
-              else:
-                running_bal -= op_amt
-              df.loc[i, "الباقي في المحفظة"] = running_bal
-            df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
-            st.success("تم تحديث السجل بنجاح!")
-            st.rerun()
+              if submit_edit:
+                conn = sqlite3.connect(DB_FILE)
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE wallet_operations SET amount = ?, details = ? WHERE"
+                    " id = ?",
+                    (new_edit_amount, new_edit_reason, selected_row_id),
+                )
+                conn.commit()
+                # إعادة حساب الأرصدة بالتسلسل
+                all_rows = pd.read_sql_query(
+                    "SELECT id, operation_type, amount FROM wallet_operations"
+                    " ORDER BY id ASC",
+                    conn,
+                )
+                running_bal = 0.0
+                for _, r in all_rows.iterrows():
+                  op_type = r["operation_type"]
+                  op_amt = float(r["amount"])
+                  if op_type in ["إيداع للمحفظة", "استرجاع للمحفظة"]:
+                    running_bal += op_amt
+                  else:
+                    running_bal -= op_amt
+                  cur.execute(
+                      "UPDATE wallet_operations SET remaining_balance = ? WHERE"
+                      " id = ?",
+                      (running_bal, r["id"]),
+                  )
+                conn.commit()
+                conn.close()
+                st.success("تم تحديث السجل بنجاح!")
+                st.rerun()
 
-          if submit_delete:
-            df = df.drop(selected_row_idx).reset_index(drop=True)
-            running_bal = 0.0
-            for i in df.index:
-              op_type = df.loc[i, "نوع العملية"]
-              op_amt = float(df.loc[i, "المبلغ"])
-              if op_type in ["إيداع للمحفظة", "استرجاع للمحفظة"]:
-                running_bal += op_amt
-              else:
-                running_bal -= op_amt
-              df.loc[i, "الباقي في المحفظة"] = running_bal
-            df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
-            st.success("تم حذف السجل بنجاح!")
-            st.rerun()
+              if submit_delete:
+                conn = sqlite3.connect(DB_FILE)
+                cur = conn.cursor()
+                cur.execute(
+                    "DELETE FROM wallet_operations WHERE id = ?",
+                    (selected_row_id,),
+                )
+                conn.commit()
+                all_rows = pd.read_sql_query(
+                    "SELECT id, operation_type, amount FROM wallet_operations"
+                    " ORDER BY id ASC",
+                    conn,
+                )
+                running_bal = 0.0
+                for _, r in all_rows.iterrows():
+                  op_type = r["operation_type"]
+                  op_amt = float(r["amount"])
+                  if op_type in ["إيداع للمحفظة", "استرجاع للمحفظة"]:
+                    running_bal += op_amt
+                  else:
+                    running_bal -= op_amt
+                  cur.execute(
+                      "UPDATE wallet_operations SET remaining_balance = ? WHERE"
+                      " id = ?",
+                      (running_bal, r["id"]),
+                  )
+                conn.commit()
+                conn.close()
+                st.success("تم حذف السجل بنجاح!")
+                st.rerun()
   else:
     st.info("لا توجد عمليات مسجلة حتى الآن.")
 
@@ -344,17 +422,24 @@ with tab1:
       debt_options = {}
       debt_list = []
       for idx, row in debts_df.iterrows():
-        label_text = f"رقم السجل ({idx}) - الجهة/الشخص: {row['التفاصيل / الجهة / السبب']} - المبلغ: {row['المبلغ']} د.ع"
-        debt_options[label_text] = idx
+        label_text = f"رقم السجل ID ({row.get('id', idx)}) - الجهة/الشخص: {row['التفاصيل / الجهة / السبب']} - المبلغ: {row['المبلغ']} د.ع"
+        debt_options[label_text] = row.get("id", idx)
         debt_list.append(label_text)
 
       selected_debt_label = st.selectbox(
           "اختر المديونية لتسديدها:", debt_list
       )
       if st.button("✅ تم التسديد (تحديث وإزالة من المديونية)"):
-        real_idx = debt_options[selected_debt_label]
-        df.loc[real_idx, "حالة الديون"] = "تم التسديد"
-        df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+        real_id = debt_options[selected_debt_label]
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE wallet_operations SET debt_status = 'تم التسديد' WHERE id"
+            " = ?",
+            (real_id,),
+        )
+        conn.commit()
+        conn.close()
         st.success("تم تسديد المديونية وتحديث حالتها بنجاح!")
         st.rerun()
     else:
