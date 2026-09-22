@@ -104,7 +104,7 @@ if "perf_summary" not in st.session_state:
 
 
 # ====================================================
-# القسم الأول: محفظة ASIA PAY (بدون أصفار مزعجة في الحقول)
+# القسم الأول: محفظة ASIA PAY
 # ====================================================
 with tab1:
   st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
@@ -635,13 +635,12 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون + عدد الحركات > 4999)
+# التبويب الرابع: KPI (مع ضمان إظهار جميع المندوبين/المكاتب Left/Outer Join)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع ملف المندوبين (اختياري"
-      " لربط الأسماء تلقائياً بالاعتماد على Short Code)."
+      "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع ملف المندوبين (إجباري/اختياري لدمج جميع المندوبين وعرضهم بالكامل)."
   )
 
   col_k1, col_k2 = st.columns(2)
@@ -653,7 +652,7 @@ with tab_kpi:
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
-        "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
+        "اختر ملف المندوبين (Short Code + اسم المندوب)",
         type=["xlsx", "xls"],
         key="kpi_rep_file_final_v5",
     )
@@ -706,9 +705,13 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # فحص هل تم رفع ملف المندوبين؟
-      has_rep_file = rep_uploaded_file is not None
+      # --- قراءة ملف المندوبين وبناء جدول مرجعي أساسي ---
+      master_reps = pd.DataFrame(
+          columns=["Short Code (G)", "اسم المندوب", "Arabic Name (F)"]
+      )
       rep_map_dict = {}
+      rep_name_map = {}
+      has_rep_file = rep_uploaded_file is not None
 
       if has_rep_file:
         try:
@@ -734,18 +737,25 @@ with tab_kpi:
           if not rep_code_col and len(rep_df.columns) > 0:
             rep_code_col = rep_df.columns[0]
           if not rep_name_col and len(rep_df.columns) > 1:
-            rep_name_col = rep_df.columns
+            rep_name_col = rep_df.columns[1]
 
-          if rep_code_col and rep_name_col:
-            for _, rrow in rep_df.iterrows():
-              c_val = str(rrow[rep_code_col]).strip()
-              n_val = str(rrow[rep_name_col]).strip()
+          extracted_list = []
+          for _, rrow in rep_df.iterrows():
+            c_val = str(rrow[rep_code_col]).strip() if rep_code_col else ""
+            n_val = str(rrow[rep_name_col]).strip() if rep_name_col else ""
+            if c_val and c_val != "nan":
+              extracted_list.append({
+                  "Short Code (G)": c_val,
+                  "اسم المندوب": n_val,
+              })
               rep_map_dict[c_val] = n_val
-          st.success("✅ تم ربط أسماء المندوبين بنجاح.")
-        except Exception as e_rep:
-          st.warning(
-              f"⚠️تعذر قراءة ملف المندوبين، سيتم الاستمرار بدونهم: {e_rep}"
+
+          master_reps = pd.DataFrame(extracted_list)
+          st.success(
+              "✅ تم ربط ملف المندوبين وضمان ظهور كافة المندوبين بالتقرير."
           )
+        except Exception as e_rep:
+          st.warning(f"⚠️ تعذر قراءة ملف المندوبين بالكامل: {e_rep}")
           has_rep_file = False
 
       target_ops = [
@@ -760,27 +770,56 @@ with tab_kpi:
       ]
 
       kpi_rows_list = []
+      # تجميع من ملف الـ KPI
+      kpi_grouped = {}
       for (g_v, f_v), grp in work_kpi.groupby(
           ["G_clean", "F_clean"], dropna=False
       ):
+        g_str = str(g_v).strip()
+        kpi_grouped[g_str] = (f_v, grp)
+
+      # دمج كل الشورت كودز الموجودة في المندوبين أو في الـ KPI لضمان الظهور الشامل
+      all_short_codes = set(master_reps["Short Code (G)"].astype(str)) | set(
+          kpi_grouped.keys()
+      )
+
+      for g_v in sorted(list(all_short_codes)):
+        f_v = ""
+        rep_name = rep_map_dict.get(g_v, "غير محدد")
+
+        if g_v in kpi_grouped:
+          f_val_found, grp = kpi_grouped[g_v]
+          f_v = f_val_found
+        else:
+          # إذا لم يوجد في الـ KPI، ننشئ إطار وهمي صفري
+          grp = pd.DataFrame(
+              columns=["G_clean", "F_clean", "B_clean", "T_num"]
+          )
+
         row_item = {
             "Short Code (G)": g_v,
         }
-        if has_rep_file:
-          row_item["اسم المندوب"] = rep_map_dict.get(
-              str(g_v).strip(), "غير محدد"
-          )
+        if has_rep_file or not master_reps.empty:
+          row_item["اسم المندوب"] = rep_name
 
         row_item["Arabic Name (F)"] = f_v
 
         for op in target_ops:
-          count_val = grp["B_clean"].str.lower() == op.lower()
-          row_item[f"عدد ({op})"] = int(count_val.sum())
+          if not grp.empty:
+            count_val = grp["B_clean"].str.lower() == op.lower()
+            row_item[f"عدد ({op})"] = int(count_val.sum())
+          else:
+            row_item[f"عدد ({op})"] = 0
 
-        b2b_mask = (
-            grp["B_clean"].str.lower() == "business to business transfer"
-        )
-        total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
+        if not grp.empty:
+          b2b_mask = (
+              grp["B_clean"].str.lower() == "business to business transfer"
+          )
+          total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
+          high_t_count = int((grp["T_num"] > 4999).sum())
+        else:
+          total_b2b_sum = 0.0
+          high_t_count = 0
 
         formatted_b2b = (
             f"{int(total_b2b_sum):,}"
@@ -798,7 +837,6 @@ with tab_kpi:
         )
 
         # --- شرط عدد الحركات بمبلغ أكثر من 4,999 من عمود T (لو 4 أو أكثر -> Done) ---
-        high_t_count = int((grp["T_num"] > 4999).sum())
         row_item["عدد الحركات > 4999 (4+)"] = (
             "Done" if high_t_count >= 4 else ""
         )
@@ -806,14 +844,10 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI")
+      st.subheader("📋 نتيجة تقرير الـ KPI (الشامل للمندوبين)")
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      out_kpi_name = (
-          "KPI_Report_With_Reps.xlsx"
-          if has_rep_file
-          else "KPI_Report_Standard.xlsx"
-      )
+      out_kpi_name = "KPI_Report_Complete_All_Reps.xlsx"
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
@@ -828,13 +862,13 @@ with tab_kpi:
       buffer_kpi.seek(0)
 
       st.download_button(
-          label="📥 تحميل تقرير KPI نهائي (Excel)",
+          label="📥 تحميل تقرير KPI نهائي شامل (Excel)",
           data=buffer_kpi,
           file_name=out_kpi_name,
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_ultimate_final_v5",
+          key="download_kpi_excel_complete_all",
       )
 
     except Exception as err:
