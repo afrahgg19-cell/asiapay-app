@@ -531,7 +531,7 @@ with tab2:
     df_to_save_pivot = st.session_state["pivot_result"].copy()
     if isinstance(df_to_save_pivot.columns, pd.MultiIndex):
       df_to_save_pivot.columns = [
-          "_".join([str(c) for c in col if c])
+          "_".join([str(c) for c in col if col[0] != ""])
           for col in df_to_save_pivot.columns
       ]
 
@@ -635,27 +635,34 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (مع المندوبين + عمودي Done للـ 100 ألف والـ 3 مليون + عدد الحركات > 4999)
+# التبويب الرابع: KPI (مع المندوبين + Wallet reports + عمودي Done للـ 100 ألف والـ 3 مليون + عدد الحركات > 4999)
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
       "1. رفـع ملف الحركات الأساسي (إجباري).\n2. رفـع ملف المندوبين (اختياري"
-      " لربط الأسماء تلقائياً بالاعتماد على Short Code)."
+      " لربط الأسماء).\n3. رفـع شيت Wallet reports (اختياري لفلترة H وتنظيف R"
+      " وربطه)."
   )
 
-  col_k1, col_k2 = st.columns(2)
+  col_k1, col_k2, col_k3 = st.columns(3)
   with col_k1:
     kpi_uploaded_file = st.file_uploader(
         "اختر ملف الإكسل الخاص بالحركات (KPI)",
         type=["xlsx", "xls"],
-        key="kpi_main_file_final_v5",
+        key="kpi_main_file_final_v6",
     )
   with col_k2:
     rep_uploaded_file = st.file_uploader(
-        "اختر ملف المندوبين (اختياري - Short Code + اسم المندوب)",
+        "اختر ملف المندوبين (اختياري)",
         type=["xlsx", "xls"],
-        key="kpi_rep_file_final_v5",
+        key="kpi_rep_file_final_v6",
+    )
+  with col_k3:
+    wallet_report_file = st.file_uploader(
+        "اختر شيت Wallet reports (اختياري)",
+        type=["xlsx", "xls"],
+        key="kpi_wallet_rep_v6",
     )
 
   if kpi_uploaded_file is not None:
@@ -706,6 +713,90 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
+      # --- 1. معالجة شيت Wallet reports (إن وجد) ---
+      wallet_aggregated_dict = {}
+      if wallet_report_file is not None:
+        try:
+          # قراءة الشيت، محاولة قراءة أول ورقة أو حسب المتاح
+          df_wallet_raw = pd.read_excel(wallet_report_file)
+
+          # البحث عن العمود H و R (أو أسمائهم إن وُجدت صراحة أو عبر الفهارس الحرفية A=0, H=7, R=17)
+          h_col_target = (
+              "H"
+              if "H" in df_wallet_raw.columns
+              else (
+                  df_wallet_raw.columns[7]
+                  if len(df_wallet_raw.columns) > 7
+                  else None
+              )
+          )
+          r_col_target = (
+              "R"
+              if "R" in df_wallet_raw.columns
+              else (
+                  df_wallet_raw.columns[17]
+                  if len(df_wallet_raw.columns) > 17
+                  else None
+              )
+          )
+          # ابحث عن عمود ربط مشترك مثل Short Code أو نفس العمود G في الـ wallet
+          g_wallet_target = (
+              "Short Code"
+              if "Short Code" in df_wallet_raw.columns
+              else (
+                  df_wallet_raw.columns[6]
+                  if len(df_wallet_raw.columns) > 6
+                  else None
+              )
+          )
+
+          if h_col_target is not None and r_col_target is not None:
+            # 2. فلترة العمود H على 'Organization E-Money Account'
+            filtered_wallet = df_wallet_raw[
+                df_wallet_raw[h_col_target].astype(str).str.strip()
+                == "Organization E-Money Account"
+            ].copy()
+
+            # 3. استخراج وتنظيف القيمة من العمود R كـ float
+            cleaned_r_vals = (
+                filtered_wallet[r_col_target]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace(" ", "", regex=False)
+                .str.extract(r"([-+]?\d*\.?\d+)")[0]
+            )
+            filtered_wallet["Cleaned_R_Val"] = pd.to_numeric(
+                cleaned_r_vals, errors="coerce"
+            ).fillna(0.0)
+
+            # 4. تجميع المبالغ حسب كود الربط المشترك (Short Code أو ما يعادله)
+            if (
+                g_wallet_target is not None
+                and g_wallet_target in filtered_wallet.columns
+            ):
+              filtered_wallet["G_join_key"] = (
+                  filtered_wallet[g_wallet_target].astype(str).str.strip()
+              )
+              grouped_w = (
+                  filtered_wallet.groupby("G_join_key")["Cleaned_R_Val"]
+                  .sum()
+                  .to_dict()
+              )
+              wallet_aggregated_dict = grouped_w
+            else:
+              # تجميع عام أو إجمالي إن لم يُعرف عمود ربط دقيق
+              total_w_val = filtered_wallet["Cleaned_R_Val"].sum()
+              wallet_aggregated_dict["_TOTAL_"] = total_w_val
+
+            st.success("✅ تمت معالجة شيت Wallet reports بنجاح.")
+          else:
+            st.warning(
+                "⚠️ لم يتم التعرف على الأعمدة H أو R المطلوبة داخل شيت Wallet"
+                " reports."
+            )
+        except Exception as e_w:
+          st.warning(f"⚠️ خطأ أثناء قراءة Wallet reports: {e_w}")
+
       # فحص هل تم رفع ملف المندوبين؟
       has_rep_file = rep_uploaded_file is not None
       rep_map_dict = {}
@@ -734,7 +825,7 @@ with tab_kpi:
           if not rep_code_col and len(rep_df.columns) > 0:
             rep_code_col = rep_df.columns[0]
           if not rep_name_col and len(rep_df.columns) > 1:
-            rep_name_col = rep_df.columns
+            rep_name_col = rep_df.columns[1]
 
           if rep_code_col and rep_name_col:
             for _, rrow in rep_df.iterrows():
@@ -744,7 +835,7 @@ with tab_kpi:
           st.success("✅ تم ربط أسماء المندوبين بنجاح.")
         except Exception as e_rep:
           st.warning(
-              f"⚠️تعذر قراءة ملف المندوبين، سيتم الاستمرار بدونهم: {e_rep}"
+              f"⚠️ تعذر قراءة ملف المندوبين، سيتم الاستمرار بدونهم: {e_rep}"
           )
           has_rep_file = False
 
@@ -772,6 +863,15 @@ with tab_kpi:
           )
 
         row_item["Arabic Name (F)"] = f_v
+
+        # إضافة عمود Wallet Organization E-Money المستخرج والمنظف من شيت Wallet reports
+        wallet_val_matched = wallet_aggregated_dict.get(
+            str(g_v).strip(),
+            wallet_aggregated_dict.get("_TOTAL_", 0.0)
+            if len(wallet_aggregated_dict) == 1 and "_TOTAL_" in wallet_aggregated_dict
+            else 0.0,
+        )
+        row_item["Wallet Org E-Money (رقم)"] = float(wallet_val_matched)
 
         for op in target_ops:
           count_val = grp["B_clean"].str.lower() == op.lower()
@@ -806,20 +906,20 @@ with tab_kpi:
         kpi_rows_list.append(row_item)
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
-      st.subheader("📋 نتيجة تقرير الـ KPI")
+      st.subheader("📋 نتيجة تقرير الـ KPI المحدث")
       st.dataframe(final_kpi_table, use_container_width=True)
 
       out_kpi_name = (
-          "KPI_Report_With_Reps.xlsx"
+          "KPI_Report_With_Reps_Wallet.xlsx"
           if has_rep_file
-          else "KPI_Report_Standard.xlsx"
+          else "KPI_Report_Standard_Wallet.xlsx"
       )
       buffer_kpi = BytesIO()
 
       df_to_save_kpi = final_kpi_table.copy()
       if isinstance(df_to_save_kpi.columns, pd.MultiIndex):
         df_to_save_kpi.columns = [
-            "_".join([str(c) for c in col if c])
+            "_".join([str(c) for c in col if col[0] != ""])
             for col in df_to_save_kpi.columns
         ]
 
@@ -834,7 +934,7 @@ with tab_kpi:
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
-          key="download_kpi_excel_ultimate_final_v5",
+          key="download_kpi_excel_ultimate_final_v6",
       )
 
     except Exception as err:
