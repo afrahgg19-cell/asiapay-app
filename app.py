@@ -69,3 +69,29 @@ def load_wallet_from_db():
             }
         )
     return df
+
+# --- تحميل البيانات ---
+df_wallet = load_wallet_from_db()
+
+# --- التبويب الأول: محفظة ASIA PAY ---
+with tab1:
+    st.subheader("📋 عمليات المحفظة")
+    if not df_wallet.empty:
+        st.dataframe(df_wallet, use_container_width=True)
+    else:
+        st.info("لا توجد عمليات مسجلة حالياً في قاعدة البيانات.")
+
+# --- التبويب الثاني: المقارنة بين شهرين ---
+with tab2:
+    st.subheader("📊 مقارنة الأداء بين شهرين")
+    st.write("محتوى المقارنة يظهر هنا...")
+
+# --- التبويب الثالث: نسبة الإنجاز ---
+with tab3:
+    st.subheader("⭐ نسبة الإنجاز")
+    st.write("محتوى نسبة الإنجاز يظهر هنا...")
+
+# --- التبويب الرابع: KPI ---
+with tab_kpi:
+    st.subheader("📈 مؤشرات الأداء الرئيسية (KPI)")
+    st.write("مؤشرات الأداء تظهر هنا...")
