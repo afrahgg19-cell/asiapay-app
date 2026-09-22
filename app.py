@@ -519,8 +519,16 @@ with tab2:
 
     output_filename = "Final_Inventory_Comparison_Report.xlsx"
     buffer_pivot = BytesIO()
+
+    df_to_save_pivot = st.session_state["pivot_result"].copy()
+    if isinstance(df_to_save_pivot.columns, pd.MultiIndex):
+      df_to_save_pivot.columns = [
+          "_".join([str(c) for c in col if c])
+          for col in df_to_save_pivot.columns
+      ]
+
     with pd.ExcelWriter(buffer_pivot, engine="openpyxl") as writer:
-      st.session_state["pivot_result"].to_excel(writer, index=False)
+      df_to_save_pivot.to_excel(writer, index=False)
     buffer_pivot.seek(0)
 
     st.download_button(
@@ -720,8 +728,16 @@ with tab_kpi:
 
       out_kpi_name = "KPI_Report_Summary.xlsx"
       buffer_kpi = BytesIO()
+
+      df_to_save_kpi = final_kpi_table.copy()
+      if isinstance(df_to_save_kpi.columns, pd.MultiIndex):
+        df_to_save_kpi.columns = [
+            "_".join([str(c) for c in col if c])
+            for col in df_to_save_kpi.columns
+        ]
+
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
-        final_kpi_table.to_excel(writer, index=False)
+        df_to_save_kpi.to_excel(writer, index=False)
       buffer_kpi.seek(0)
 
       st.download_button(
