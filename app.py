@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -615,7 +616,7 @@ with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
       "تجميع Short Code (عمود H)، الاسم بالعربي (عمود F)، عد العمليات"
-      " من عمود C، واستخراج وتحويل مبالغ business to business transfer من عمود T إلى أرقام."
+      " من عمود C، واستخراج واستخراج مبالغ B2B من عمود T النصي."
   )
 
   kpi_uploaded_file = st.file_uploader(
@@ -629,7 +630,6 @@ with tab_kpi:
       kpi_df = pd.read_excel(kpi_uploaded_file)
       cols_list = kpi_df.columns.tolist()
 
-      # تحديد المواقع بدقة (A=0, B=1, C=2, F=5, H=7, T=19)
       h_idx = 7 if len(cols_list) > 7 else 0
       f_idx = 5 if len(cols_list) > 5 else 0
       c_idx = 2 if len(cols_list) > 2 else 0
@@ -656,7 +656,6 @@ with tab_kpi:
           else kpi_df.iloc[:, c_idx].astype(str).str.strip()
       )
 
-      # استخراج عمود T كنص ومعالجة القيم النصية (إزالة الفواصل، الفراغات، والرموز غير الرقمية إن وجدت)
       raw_t_series = (
           kpi_df["T"].astype(str)
           if "T" in kpi_df.columns
@@ -664,15 +663,19 @@ with tab_kpi:
       )
       work_kpi["T_text"] = raw_t_series.str.strip()
 
-      # تحويل النصوص في عمود T إلى قيم رقمية بدقة (مع التعامل مع الفواصل الآلاف)
-      cleaned_t_numeric = (
-          work_kpi["T_text"]
-          .str.replace(",", "", regex=False)
-          .str.replace(" ", "", regex=False)
-      )
-      work_kpi["T_num"] = pd.to_numeric(
-          cleaned_t_numeric, errors="coerce"
-      ).fillna(0.0)
+      def extract_number_from_text(val):
+        if pd.isna(val):
+          return 0.0
+        val_str = str(val).replace(",", "")
+        match = re.search(r"[-+]?\d*\.?\d+", val_str)
+        if match:
+          try:
+            return float(match.group(0))
+          except:
+            return 0.0
+        return 0.0
+
+      work_kpi["T_num"] = work_kpi["T_text"].apply(extract_number_from_text)
 
       kpi_rows_list = []
       for (h_v, f_v), grp in work_kpi.groupby(
@@ -683,22 +686,17 @@ with tab_kpi:
             "Arabic Name (F)": f_v,
         }
 
-        # عدد العمليات لكل نوع من عمود C
         c_value_counts = grp["C_clean"].value_counts()
         for op_name, op_count in c_value_counts.items():
           row_item[f"عدد ({op_name})"] = op_count
 
-        # فلترة عمليات business to business transfer (مطابقة غير حساسة لحالة الأحرف)
         b2b_mask = (
             grp["C_clean"]
             .str.lower()
             .str.contains("business to business transfer", na=False)
         )
 
-        # جمع الأرقام المحولة من عمود T لهذه الصفوف
         b2b_total_num = grp.loc[b2b_mask, "T_num"].sum()
-
-        # الاحتفاظ بالنصوص الأصلية للمقارنة أو العرض
         b2b_texts = [
             t
             for t in grp.loc[b2b_mask, "T_text"].tolist()
@@ -715,6 +713,12 @@ with tab_kpi:
       final_kpi_table = pd.DataFrame(kpi_rows_list).fillna(0)
       st.subheader("📋 نتيجة تقرير الـ KPI")
       st.dataframe(final_kpi_table, use_container_width=True)
+
+      with st.expander("🔍 فحص القيم المستخرجة من عمود T (للتأكد)"):
+        st.dataframe(
+            work_kpi[["C_clean", "T_text", "T_num"]].head(20),
+            use_container_width=True,
+        )
 
       out_kpi_name = "KPI_Report_Summary.xlsx"
       final_kpi_table.to_excel(out_kpi_name, index=False)
