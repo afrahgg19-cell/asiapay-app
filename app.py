@@ -107,6 +107,20 @@ def init_db():
             remaining_balance REAL
         )
     """)
+  # جدول خاص بحفظ البيانات المرفوعة من الإكسل بشكل دائم
+  c.execute("""
+        CREATE TABLE IF NOT EXISTS uploaded_excel_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            office_name TEXT,
+            received_amount REAL,
+            payment_method TEXT,
+            remaining REAL,
+            deposited_amount REAL,
+            total_deposits REAL,
+            returned_amount REAL,
+            notes TEXT
+        )
+    """)
   conn.commit()
   conn.close()
 
@@ -172,6 +186,46 @@ if "perf_summary" not in st.session_state:
 # ====================================================
 with tab1:
   st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
+  st.markdown("---")
+
+  # --- ميزة رفع ملف الإكسل المباشر وحفظه بقاعدة البيانات ---
+  st.subheader("📁 رفع وتخزين ملف الإكسل الجديد بشكل دائم")
+  uploaded_custom_excel = st.file_uploader(
+      "اختر ملف الإكسل الخاص بالمكاتب والحسابات لتخزينه في النظام",
+      type=["xlsx", "xls"],
+      key="custom_excel_uploader",
+  )
+
+  if uploaded_custom_excel is not None:
+    try:
+      custom_df = pd.read_excel(uploaded_custom_excel)
+      # تنظيف ومطابقة الأعمدة حسب صورتك (اسم المكتب، المبلغ المستلم، طريقت الدفع، الباقي، المبلغ المودع، الإيداعات الكلية، المبلغ المسترجع، ملاحظات)
+      conn_ex = sqlite3.connect(DB_FILE)
+      # تفريغ البيانات القديمة أو إضافتها كقاعدة بيانات دائمة جديدة
+      custom_df.to_sql(
+          "uploaded_excel_data", conn_ex, if_exists="replace", index=False
+      )
+      conn_ex.close()
+      st.success(
+          "✅ تم رفع ملف الإكسل وحفظ كافة المعلومات في قاعدة البيانات الدائمة"
+          " بنجاح!"
+      )
+    except Exception as ex_err:
+      st.error(f"⚠️ حدث خطأ أثناء قراءة ملف الإكسل المرفوع: {ex_err}")
+
+  # عرض البيانات المخزنة مسبقاً من الإكسل إن وجدت
+  try:
+    conn_ex = sqlite3.connect(DB_FILE)
+    saved_excel_df = pd.read_sql(
+        "SELECT * FROM uploaded_excel_data", conn_ex
+    )
+    conn_ex.close()
+    if not saved_excel_df.empty:
+      st.markdown("#### 📋 بيانات الإكسل المخزنة حالياً في النظام الدائم:")
+      st.dataframe(saved_excel_df, use_container_width=True)
+  except Exception:
+    pass
+
   st.markdown("---")
 
   df = load_wallet_from_db()
@@ -728,7 +782,8 @@ with tab3:
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
   st.write(
-      "1. رفـع ملف الإكسل الخاص بالحركات و Wallet report (إجباري).\n2. رفـع ملف المندوبين/الإكسل الاختياري لدمجه كلياً حسب الشورت كود."
+      "1. رفـع ملف الإكسل الخاص بالحركات و Wallet report (إجباري).\n2. رفـع"
+      " ملف المندوبين/الإكسل الاختياري لدمجه كلياً حسب الشورت كود."
   )
 
   col_k1, col_k2 = st.columns(2)
@@ -966,7 +1021,7 @@ with tab_kpi:
           if c_k not in row_item:
             row_item[c_k] = c_v
 
-        # إضافة رصيد المحفظة وعمليات الـ KPI كبقية السوالف
+        # إضافة رصيد المحفظة وعمليات الـ KPI
         w_bal = wallet_balance_map.get(str(g_v).strip(), 0.0)
         row_item["رصيد المحفظة"] = (
             f"{w_bal:,.2f}" if isinstance(w_bal, (int, float)) else w_bal
@@ -983,7 +1038,6 @@ with tab_kpi:
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
 
-      # ترتيب صارم ومحدد حسب طلبك تماماً مع بقية الأعمدة بعدها
       explicit_order = [
           "Short Code",
           "Organiztione Arabic name",
@@ -1021,7 +1075,6 @@ with tab_kpi:
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
         df_to_save_kpi.to_excel(writer, index=False, sheet_name="KPI_Report")
 
-      # تطبيق تنسيق KPL على تقرير الـ KPI النهائي
       buffer_kpi.seek(0)
       wb_k = openpyxl.load_workbook(buffer_kpi)
       apply_kpl_styling_to_sheet(wb_k.active)
