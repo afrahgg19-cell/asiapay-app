@@ -828,6 +828,7 @@ with tab_kpi:
       g_col_name = get_col_safe("Short Code", 6, kpi_df)
       f_col_name = get_col_safe("Arabic Name", 5, kpi_df)
       b_col_name = get_col_safe("B", 1, kpi_df)
+      c_col_name = get_col_safe("Reason Type", 2, kpi_df)
       t_col_name = get_col_safe("T", 19, kpi_df)
 
       work_kpi = pd.DataFrame()
@@ -845,6 +846,13 @@ with tab_kpi:
       work_kpi["B_clean"] = (
           kpi_df[b_col_name].astype(str).str.strip()
           if b_col_name in kpi_df.columns
+          else pd.Series([""] * len(kpi_df))
+      )
+      # عمود Reason Type (C) - يُستخدم لتصنيف عمليات
+      # "Organization Intra Account Transfer-Top to Child"
+      work_kpi["C_clean"] = (
+          kpi_df[c_col_name].astype(str).str.strip()
+          if c_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
 
@@ -872,6 +880,18 @@ with tab_kpi:
           "E-money Deposit",
           "Electronic Vouchers",
       ]
+
+      # --- تجميع مبالغ "Organization Intra Account Transfer-Top to Child"
+      # مصنفة حسب الشورت كود (بدل الفلترة السابقة على نوع العملية B2B) ---
+      b2b_summary = (
+          work_kpi[
+              work_kpi["C_clean"].str.lower()
+              == "organization intra account transfer-top to child"
+          ]
+          .groupby("G_upper_key")["T_num"]
+          .sum()
+          .to_dict()
+      )
 
       kpi_grouped = {}
       for (g_v, f_v), grp in work_kpi.groupby(
@@ -927,17 +947,16 @@ with tab_kpi:
           f_v = f_val_found
         else:
           grp = pd.DataFrame(
-              columns=["G_clean", "F_clean", "B_clean", "T_num"]
+              columns=["G_clean", "F_clean", "B_clean", "C_clean", "T_num"]
           )
 
+        # مجموع "Organization Intra Account Transfer-Top to Child" لهذا
+        # الشورت كود، مأخوذ من b2b_summary المُجهّز مسبقاً
+        total_b2b_sum = b2b_summary.get(g_v, 0.0)
+
         if not grp.empty:
-          b2b_mask = (
-              grp["B_clean"].str.lower() == "business to business transfer"
-          )
-          total_b2b_sum = grp.loc[b2b_mask, "T_num"].sum()
           high_t_count = int((grp["T_num"] > 4999).sum())
         else:
-          total_b2b_sum = 0.0
           high_t_count = 0
 
         formatted_b2b = (
