@@ -95,6 +95,23 @@ def normalize_short_code(val):
   return s.upper()
 
 
+# --- دالة بحث مرنة عن عمود معين بغض النظر عن المسافات/حالة الأحرف ---
+
+
+def find_col_flexible(df_columns, keywords):
+  """
+  تدور على أول عمود يحتوي أي كلمة من keywords، بعد تجاهل المسافات
+  والشرطات السفلية وحالة الأحرف (كبيرة/صغيرة).
+  مثال: "OrganizationArabicName" تُطابق الكلمة المفتاحية "arabicname"
+  """
+  for c in df_columns:
+    c_norm = str(c).lower().replace(" ", "").replace("_", "").replace("-", "")
+    for kw in keywords:
+      if kw in c_norm:
+        return c
+  return None
+
+
 # --- لوحة التحكم في الأعلى ---
 st.markdown(
     "<h2 style='text-align: center; color: #1E3A8A;'>💰 نظام إدارة المحفظة"
@@ -981,32 +998,33 @@ with tab_kpi:
       opt_df = None
       opt_join_col = None
       opt_name_col = None
+      opt_address_col = None
+      opt_phone_col = None
       if rep_uploaded_file is not None:
         try:
           opt_df = pd.read_excel(rep_uploaded_file)
-          for c in opt_df.columns:
-            c_low = str(c).lower()
-            if (
-                "short" in c_low
-                or "code" in c_low
-                or "كود" in str(c)
-                or "short_code" in c_low
-            ):
-              opt_join_col = c
-              break
+
+          # عمود الشورت كود بالملف الاختياري
+          opt_join_col = find_col_flexible(
+              opt_df.columns, ["shortcode", "كود"]
+          )
           if opt_join_col is None and len(opt_df.columns) > 0:
             opt_join_col = opt_df.columns[0]
 
-          # تحديد عمود الاسم بالملف الاختياري (يُستخدم كمصدر رئيسي للاسم)
-          for c in opt_df.columns:
-            c_low = str(c).lower()
-            if (
-                "arabic name" in c_low
-                or "الاسم" in str(c)
-                or c_low == "name"
-            ):
-              opt_name_col = c
-              break
+          # عمود الاسم بالملف الاختياري (يُستخدم كمصدر رئيسي للاسم) -
+          # بحث مرن يطابق "OrganizationArabicName" أو "Arabic Name" أو غيرها
+          opt_name_col = find_col_flexible(
+              opt_df.columns,
+              ["organizationarabicname", "arabicname", "الاسم", "name"],
+          )
+          # عمود العنوان بالملف الاختياري
+          opt_address_col = find_col_flexible(
+              opt_df.columns, ["address", "العنوان"]
+          )
+          # عمود رقم الهاتف بالملف الاختياري
+          opt_phone_col = find_col_flexible(
+              opt_df.columns, ["msisdn", "phone", "mobile", "هاتف"]
+          )
 
           opt_df["_opt_key"] = opt_df[opt_join_col].apply(normalize_short_code)
           all_short_codes = all_short_codes | set(
@@ -1037,12 +1055,27 @@ with tab_kpi:
               columns=["G_clean", "F_clean", "B_clean", "C_clean", "T_num"]
           )
 
-        # اسم المكتب: يُؤخذ أولاً من الإكسل الاختياري، ولو غير موجود
-        # يرجع للاسم من الملف الأصلي كحل احتياطي
+        # اسم المكتب: يُؤخذ أولاً من عمود الاسم بالإكسل الاختياري
+        # (اللي تم لقطته بالبحث المرن)، ولو فاضي يرجع للاسم من الملف
+        # الأصلي كحل احتياطي
         name_from_opt = ""
         if opt_name_col is not None:
-          name_from_opt = opt_data_map.get(g_v, {}).get(opt_name_col, "")
+          raw_name_val = opt_data_map.get(g_v, {}).get(opt_name_col, "")
+          name_from_opt = (
+              "" if pd.isna(raw_name_val) else str(raw_name_val).strip()
+          )
         office_name = name_from_opt if name_from_opt else f_v
+
+        # العنوان ورقم الهاتف: من الإكسل الاختياري عبر البحث المرن
+        address_val = ""
+        if opt_address_col is not None:
+          raw_addr = opt_data_map.get(g_v, {}).get(opt_address_col, "")
+          address_val = "" if pd.isna(raw_addr) else str(raw_addr).strip()
+
+        phone_val = ""
+        if opt_phone_col is not None:
+          raw_phone = opt_data_map.get(g_v, {}).get(opt_phone_col, "")
+          phone_val = "" if pd.isna(raw_phone) else str(raw_phone).strip()
 
         # مجموع "Organization Intra Account Transfer-Top to Child" لهذا
         # الشورت كود، مأخوذ من b2b_summary المُجهّز مسبقاً
@@ -1064,12 +1097,8 @@ with tab_kpi:
         row_item = {
             "Short Code": g_v,
             "Organiztione Arabic name": office_name,
-            "address": opt_data_map.get(g_v, {}).get(
-                "address", opt_data_map.get(g_v, {}).get("العنوان", "")
-            ),
-            "msisdn": opt_data_map.get(g_v, {}).get(
-                "msisdn", opt_data_map.get(g_v, {}).get("رقم الهاتف", "")
-            ),
+            "address": address_val,
+            "msisdn": phone_val,
             "Busines to Business transfer": formatted_b2b,
             "حركه 100 الف": "Done" if total_b2b_sum > 99000 else "",
             "حركه 3 مليون": "Done" if total_b2b_sum > 2999000 else "",
