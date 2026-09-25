@@ -63,6 +63,8 @@ def apply_kpl_styling_to_sheet(ws):
         cell.font = cell_font
         if isinstance(cell.value, (int, float)):
           cell.alignment = Alignment(horizontal='right', vertical='center')
+          # تنسيق الأرقام تلقائياً بفواصل الآلاف (رقم حقيقي قابل للحساب)
+          cell.number_format = '#,##0'
         else:
           cell.alignment = Alignment(horizontal='left', vertical='center')
 
@@ -1086,11 +1088,9 @@ with tab_kpi:
         else:
           high_t_count = 0
 
-        formatted_b2b = (
-            f"{int(total_b2b_sum):,}"
-            if total_b2b_sum == int(total_b2b_sum)
-            else f"{total_b2b_sum:,.2f}"
-        )
+        # رقم حقيقي (float) بدل نص، حتى يبقى قابل للحساب والفلترة بالإكسل
+        # مباشرة، وتنسيق الفواصل يصير من خصائص الإكسل (number_format)
+        formatted_b2b = float(total_b2b_sum)
 
         w_bal = wallet_balance_map.get(g_v, 0.0)
 
@@ -1103,8 +1103,9 @@ with tab_kpi:
             "حركه 100 الف": "Done" if total_b2b_sum > 99000 else "",
             "حركه 3 مليون": "Done" if total_b2b_sum > 2999000 else "",
             "اربع حركات": "Done" if high_t_count >= 4 else "",
+            # رقم حقيقي هنا أيضاً لنفس السبب
             "رصيد المحفظة": (
-                f"{w_bal:,.2f}" if isinstance(w_bal, (int, float)) else w_bal
+                float(w_bal) if isinstance(w_bal, (int, float)) else w_bal
             ),
         }
 
