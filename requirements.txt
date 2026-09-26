@@ -1,6 +1,5 @@
-gspread
-google-auth
-pandas
 streamlit
+pandas
 openpyxl
 xlsxwriter
+psycopg2-binary
