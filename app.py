@@ -1,11 +1,12 @@
 from contextlib import contextmanager
 from io import BytesIO
 import os
-import sqlite3
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import streamlit as st
 
 # إعدادات الصفحة
@@ -131,23 +132,38 @@ tab1, tab2, tab3, tab_kpi = st.tabs([
 
 # ====================================================
 # طبقة قاعدة البيانات الاحترافية (خاصة بتبويب المحفظة فقط)
+# قاعدة بيانات دائمة على Supabase (PostgreSQL) - لا تنمسح أبداً
+# مهما صار ريستارت أو إعادة نشر أو نوم التطبيق على Streamlit Cloud
 # ====================================================
-DB_FILE = "asia_pay_wallet.db"
 
 
 @contextmanager
 def get_db_connection():
   """
-  Context manager احترافي للاتصال بقاعدة البيانات:
-  - يفعّل WAL mode لتقليل تعارض القراءة/الكتابة وزيادة الموثوقية
+  Context manager احترافي للاتصال بقاعدة بيانات Supabase:
+  - يقرأ بيانات الاتصال من Streamlit Secrets (آمن، غير مخزّن بالكود)
   - يسوي commit تلقائي عند النجاح، و rollback تلقائي عند حدوث خطأ
   - يضمن إغلاق الاتصال دائماً حتى لو صار استثناء
   """
-  conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=10)
   try:
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    conn.row_factory = sqlite3.Row
+    db_secrets = st.secrets["connections"]["supabase"]
+    conn = psycopg2.connect(
+        host=db_secrets["host"],
+        port=db_secrets["port"],
+        dbname=db_secrets["database"],
+        user=db_secrets["user"],
+        password=db_secrets["password"],
+        cursor_factory=RealDictCursor,
+        connect_timeout=10,
+    )
+  except Exception as e:
+    st.error(
+        "⚠️ تعذر الاتصال بقاعدة بيانات Supabase. تأكد من إعداد Secrets"
+        f" بشكل صحيح. تفاصيل الخطأ: {e}"
+    )
+    raise
+
+  try:
     yield conn
     conn.commit()
   except Exception:
@@ -161,9 +177,10 @@ def init_db():
   """إنشاء الجدول والفهارس (Indexes) لتسريع الاستعلامات المتكررة"""
   try:
     with get_db_connection() as conn:
-      conn.execute("""
+      cur = conn.cursor()
+      cur.execute("""
           CREATE TABLE IF NOT EXISTS wallet_operations (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id SERIAL PRIMARY KEY,
               timestamp TEXT NOT NULL,
               op_type TEXT NOT NULL,
               amount REAL NOT NULL CHECK (amount >= 0),
@@ -171,21 +188,22 @@ def init_db():
               payment_method TEXT,
               debt_status TEXT,
               remaining_balance REAL NOT NULL,
-              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           )
       """)
-      conn.execute("""
+      cur.execute("""
           CREATE INDEX IF NOT EXISTS idx_wallet_timestamp
           ON wallet_operations (timestamp)
       """)
-      conn.execute("""
+      cur.execute("""
           CREATE INDEX IF NOT EXISTS idx_wallet_op_type
           ON wallet_operations (op_type)
       """)
-      conn.execute("""
+      cur.execute("""
           CREATE INDEX IF NOT EXISTS idx_wallet_debt_status
           ON wallet_operations (debt_status)
       """)
+      cur.close()
   except Exception as e:
     st.error(f"⚠️ خطأ أثناء تهيئة قاعدة البيانات: {e}")
 
@@ -234,10 +252,13 @@ def load_wallet_from_db():
 def get_latest_balance():
   try:
     with get_db_connection() as conn:
-      row = conn.execute(
+      cur = conn.cursor()
+      cur.execute(
           "SELECT remaining_balance FROM wallet_operations"
           " ORDER BY id DESC LIMIT 1"
-      ).fetchone()
+      )
+      row = cur.fetchone()
+      cur.close()
     return row["remaining_balance"] if row else 0.0
   except Exception as e:
     st.error(f"⚠️ خطأ أثناء قراءة الرصيد: {e}")
@@ -250,12 +271,13 @@ def insert_operation(
   """إدراج عملية جديدة بأمان (مع commit/rollback تلقائي عبر الـ context manager)"""
   try:
     with get_db_connection() as conn:
-      conn.execute(
+      cur = conn.cursor()
+      cur.execute(
           """
               INSERT INTO wallet_operations
               (timestamp, op_type, amount, details, payment_method,
                debt_status, remaining_balance)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
+              VALUES (%s, %s, %s, %s, %s, %s, %s)
           """,
           (
               str(pd.Timestamp.now()),
@@ -267,6 +289,7 @@ def insert_operation(
               new_balance,
           ),
       )
+      cur.close()
     return True
   except Exception as e:
     st.error(f"⚠️ خطأ أثناء حفظ العملية: {e}")
@@ -276,10 +299,13 @@ def insert_operation(
 def update_operation(record_id, new_amount, new_details):
   try:
     with get_db_connection() as conn:
-      conn.execute(
-          "UPDATE wallet_operations SET amount = ?, details = ? WHERE id = ?",
+      cur = conn.cursor()
+      cur.execute(
+          "UPDATE wallet_operations SET amount = %s, details = %s"
+          " WHERE id = %s",
           (new_amount, new_details, int(record_id)),
       )
+      cur.close()
     return True
   except Exception as e:
     st.error(f"⚠️ خطأ أثناء تعديل السجل: {e}")
@@ -289,9 +315,11 @@ def update_operation(record_id, new_amount, new_details):
 def delete_operation(record_id):
   try:
     with get_db_connection() as conn:
-      conn.execute(
-          "DELETE FROM wallet_operations WHERE id = ?", (int(record_id),)
+      cur = conn.cursor()
+      cur.execute(
+          "DELETE FROM wallet_operations WHERE id = %s", (int(record_id),)
       )
+      cur.close()
     return True
   except Exception as e:
     st.error(f"⚠️ خطأ أثناء حذف السجل: {e}")
@@ -301,11 +329,13 @@ def delete_operation(record_id):
 def mark_debt_paid(record_id):
   try:
     with get_db_connection() as conn:
-      conn.execute(
+      cur = conn.cursor()
+      cur.execute(
           "UPDATE wallet_operations SET debt_status = 'تم التسديد'"
-          " WHERE id = ?",
+          " WHERE id = %s",
           (int(record_id),),
       )
+      cur.close()
     return True
   except Exception as e:
     st.error(f"⚠️ خطأ أثناء تحديث حالة التسديد: {e}")
@@ -325,7 +355,7 @@ if "perf_summary" not in st.session_state:
 # القسم الأول: محفظة ASIA PAY
 # ====================================================
 with tab1:
-  st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة)")
+  st.markdown("### 💼 محفظة ASIA PAY (قاعدة بيانات دائمة على Supabase)")
   st.markdown("---")
 
   df = load_wallet_from_db()
