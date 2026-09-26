@@ -142,6 +142,9 @@ def get_db_connection():
   """
   Context manager احترافي للاتصال بقاعدة بيانات Supabase:
   - يقرأ بيانات الاتصال من Streamlit Secrets (آمن، غير مخزّن بالكود)
+  - اتصال عادي (بدون RealDictCursor) حتى يتوافق مع pd.read_sql بشكل صحيح؛
+    أي دالة تحتاج قراءة الصف كـ dict تُمرر RealDictCursor بنفسها عند
+    إنشاء الـ cursor الخاص فيها (مثال: get_latest_balance)
   - يسوي commit تلقائي عند النجاح، و rollback تلقائي عند حدوث خطأ
   - يضمن إغلاق الاتصال دائماً حتى لو صار استثناء
   """
@@ -153,7 +156,6 @@ def get_db_connection():
         dbname=db_secrets["database"],
         user=db_secrets["user"],
         password=db_secrets["password"],
-        cursor_factory=RealDictCursor,
         connect_timeout=10,
     )
   except Exception as e:
@@ -252,7 +254,7 @@ def load_wallet_from_db():
 def get_latest_balance():
   try:
     with get_db_connection() as conn:
-      cur = conn.cursor()
+      cur = conn.cursor(cursor_factory=RealDictCursor)
       cur.execute(
           "SELECT remaining_balance FROM wallet_operations"
           " ORDER BY id DESC LIMIT 1"
