@@ -1276,6 +1276,12 @@ with tab_kpi:
           existing_cols + remaining_cols + last_cols
       ]
 
+      # حذف الأعمدة J و K و L (الأعمدة رقم 10 و 11 و 12) من التقرير
+      cols_to_drop_jkl = [
+          c for i, c in enumerate(final_kpi_table.columns) if i in (9, 10, 11)
+      ]
+      final_kpi_table = final_kpi_table.drop(columns=cols_to_drop_jkl)
+
       st.subheader(
           "📋 نتيجة تقرير الـ KPI (دمج شامل للحركات + الإكسل الاختياري +"
           " المحفظة بالترتيب المطلوب)"
