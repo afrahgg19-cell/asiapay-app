@@ -865,6 +865,15 @@ with tab_kpi:
       key="kpi_cum_file_v1",
   )
 
+  cum_day_num = st.number_input(
+      "اليوم الحالي من الشهر (عدد الأيام المحسوبة بالتراكمي)",
+      min_value=1,
+      max_value=31,
+      value=int(pd.Timestamp.now().day),
+      step=1,
+      key="kpi_cum_day_v1",
+  )
+
   if kpi_uploaded_file is not None:
     try:
       excel_obj = pd.ExcelFile(kpi_uploaded_file)
@@ -1114,6 +1123,12 @@ with tab_kpi:
           st.warning(f"⚠️ ملاحظة قراءة ملف الرصيد التراكمي: {e_cum}")
           cum_prev_map = {}
 
+      # --- تاركت 3 مليون بناءً على الرصيد التراكمي ---
+      # 3 مليون خلال 30 يوم = 100 الف يومياً (المسار المثالي)
+      cum_target_val = 3000000.0
+      cum_daily_pace = cum_target_val / 30.0
+      cum_expected_now = cum_daily_pace * float(cum_day_num)
+
       all_short_codes.discard("")
 
       opt_data_map = {}
@@ -1190,8 +1205,21 @@ with tab_kpi:
         # الرصيد التراكمي = التراكمي السابق + رصيد المحفظة لليوم
         if cum_uploaded_file is not None:
           w_today = float(w_bal) if isinstance(w_bal, (int, float)) else 0.0
-          row_item["الرصيد التراكمي"] = (
-              float(cum_prev_map.get(g_v, 0.0)) + w_today
+          cum_total = float(cum_prev_map.get(g_v, 0.0)) + w_today
+          row_item["الرصيد التراكمي"] = cum_total
+
+          # حركه 3 مليون تعتمد هنا على الرصيد التراكمي
+          if cum_total >= cum_target_val:
+            row_item["حركه 3 مليون"] = "Done"
+            row_item["وضع المحفظة"] = "Done"
+          elif cum_total >= cum_expected_now:
+            row_item["حركه 3 مليون"] = ""
+            row_item["وضع المحفظة"] = "مثالي"
+          else:
+            row_item["حركه 3 مليون"] = ""
+            row_item["وضع المحفظة"] = "لازم تعوض"
+          row_item["المبلغ المطلوب تعويضه"] = max(
+              0.0, cum_expected_now - cum_total
           )
 
         # دمج أي أعمدة إضافية أخرى من الإكسل الاختياري إن وجدت
@@ -1228,15 +1256,25 @@ with tab_kpi:
           "حركه 3 مليون",
           "اربع حركات",
           "رصيد المحفظة",
+      ]
+      # أعمدة الرصيد التراكمي تكون آخر شي بالجدول
+      last_cols_order = [
           "الرصيد التراكمي",
+          "وضع المحفظة",
+          "المبلغ المطلوب تعويضه",
       ]
       existing_cols = [
           c for c in explicit_order if c in final_kpi_table.columns
       ]
+      last_cols = [c for c in last_cols_order if c in final_kpi_table.columns]
       remaining_cols = [
-          c for c in final_kpi_table.columns if c not in existing_cols
+          c
+          for c in final_kpi_table.columns
+          if c not in existing_cols and c not in last_cols
       ]
-      final_kpi_table = final_kpi_table[existing_cols + remaining_cols]
+      final_kpi_table = final_kpi_table[
+          existing_cols + remaining_cols + last_cols
+      ]
 
       st.subheader(
           "📋 نتيجة تقرير الـ KPI (دمج شامل للحركات + الإكسل الاختياري +"
