@@ -859,6 +859,12 @@ with tab_kpi:
         key="kpi_rep_file_final_v7",
     )
 
+  cum_uploaded_file = st.file_uploader(
+      "اختر ملف الرصيد التراكمي السابق (شورت كود + الرصيد التراكمي) - اختياري",
+      type=["xlsx", "xls"],
+      key="kpi_cum_file_v1",
+  )
+
   if kpi_uploaded_file is not None:
     try:
       excel_obj = pd.ExcelFile(kpi_uploaded_file)
@@ -1068,6 +1074,46 @@ with tab_kpi:
           st.warning(f"⚠️ ملاحظة قراءة الإكسل الاختياري: {e_opt}")
           opt_df = None
 
+      # --- قراءة ملف الرصيد التراكمي السابق (اختياري) ---
+      cum_prev_map = {}
+      if cum_uploaded_file is not None:
+        try:
+          cum_df = pd.read_excel(cum_uploaded_file)
+          cum_code_col = find_col_flexible(
+              cum_df.columns, ["shortcode", "كود"]
+          )
+          if cum_code_col is None:
+            cum_code_col = cum_df.columns[0]
+          cum_val_col = find_col_flexible(
+              cum_df.columns, ["الرصيدالتراكمي", "تراكمي", "cumulative"]
+          )
+          if cum_val_col is None:
+            cum_val_col = find_col_flexible(cum_df.columns, ["رصيد", "balance"])
+          if cum_val_col is None or cum_val_col == cum_code_col:
+            cum_val_col = cum_df.columns[1] if len(cum_df.columns) > 1 else None
+
+          if cum_val_col is not None:
+            cum_df["_cum_key"] = cum_df[cum_code_col].apply(
+                normalize_short_code
+            )
+            cum_df["_cum_val"] = pd.to_numeric(
+                cum_df[cum_val_col]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace(" ", "", regex=False),
+                errors="coerce",
+            ).fillna(0.0)
+            cum_prev_map = (
+                cum_df[cum_df["_cum_key"] != ""]
+                .groupby("_cum_key")["_cum_val"]
+                .sum()
+                .to_dict()
+            )
+            all_short_codes = all_short_codes | set(cum_prev_map.keys())
+        except Exception as e_cum:
+          st.warning(f"⚠️ ملاحظة قراءة ملف الرصيد التراكمي: {e_cum}")
+          cum_prev_map = {}
+
       all_short_codes.discard("")
 
       opt_data_map = {}
@@ -1141,6 +1187,13 @@ with tab_kpi:
             ),
         }
 
+        # الرصيد التراكمي = التراكمي السابق + رصيد المحفظة لليوم
+        if cum_uploaded_file is not None:
+          w_today = float(w_bal) if isinstance(w_bal, (int, float)) else 0.0
+          row_item["الرصيد التراكمي"] = (
+              float(cum_prev_map.get(g_v, 0.0)) + w_today
+          )
+
         # دمج أي أعمدة إضافية أخرى من الإكسل الاختياري إن وجدت
         for c_k, c_v in opt_data_map.get(g_v, {}).items():
           if c_k not in row_item:
@@ -1175,6 +1228,7 @@ with tab_kpi:
           "حركه 3 مليون",
           "اربع حركات",
           "رصيد المحفظة",
+          "الرصيد التراكمي",
       ]
       existing_cols = [
           c for c in explicit_order if c in final_kpi_table.columns
