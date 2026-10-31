@@ -1081,6 +1081,7 @@ with tab_kpi:
       opt_name_col = None
       opt_address_col = None
       opt_phone_col = None
+      active_codes_only = None
       if rep_uploaded_file is not None:
         try:
           opt_df = pd.read_excel(rep_uploaded_file)
@@ -1103,6 +1104,23 @@ with tab_kpi:
           )
 
           opt_df["_opt_key"] = opt_df[opt_join_col].apply(normalize_short_code)
+
+          # --- فلترة الحالة: Active فقط ---
+          status_col = find_col_flexible(
+              opt_df.columns, ["status", "الحالة", "حالة"]
+          )
+          if status_col is not None:
+            opt_df = opt_df[
+                opt_df[status_col].astype(str).str.strip().str.lower()
+                == "active"
+            ].copy()
+            active_codes_only = set(
+                opt_df["_opt_key"].dropna().astype(str).tolist()
+            )
+            active_codes_only.discard("")
+          else:
+            st.warning("⚠️ ما لقيت عمود Status بإكسل الوكلاء، ما تم الفلترة.")
+
           all_short_codes = all_short_codes | set(
               opt_df["_opt_key"].dropna().astype(str).tolist()
           )
@@ -1156,6 +1174,9 @@ with tab_kpi:
       cum_expected_now = cum_daily_pace * float(cum_day_num)
 
       all_short_codes.discard("")
+      # إذا فُلتر الإكسل على Active، نعتمد الوكلاء النشطين فقط
+      if active_codes_only is not None:
+        all_short_codes = all_short_codes & active_codes_only
 
       opt_data_map = {}
       if opt_df is not None and "_opt_key" in opt_df.columns:
@@ -1345,17 +1366,17 @@ with tab_kpi:
             "📌 ارفع إكسل الوكلاء (شورت كود + اسم المندوب) حتى تظهر المتابعة."
         )
       else:
-        rep_col = find_col_flexible(
-            opt_df.columns,
-            ["مندوب", "representative", "rep", "salesman", "supervisor",
-             "مشرف", "موظف"],
-        )
-        if rep_col is None:
+        # اسم الموظف = العمود L بإكسل الوكلاء (الفهرس 11)
+        # ملاحظة: _opt_key مضاف بآخر الأعمدة فما يغيّر موقع L
+        if len(opt_df.columns) > 11:
+          rep_col = opt_df.columns[11]
+        else:
           rep_col = st.selectbox(
-              "ما لقيت عمود المندوب تلقائياً، اختره:",
-              list(opt_df.columns),
+              "إكسل الوكلاء أقل من 12 عمود، اختر عمود اسم الموظف:",
+              [c for c in opt_df.columns if c != "_opt_key"],
               key="rep_col_manual",
           )
+        st.caption(f"اسم الموظف مأخوذ من العمود L: «{rep_col}»")
 
         rep_map = (
             opt_df[opt_df["_opt_key"] != ""]
@@ -1499,10 +1520,6 @@ with tab_kpi:
 
         # --- الإكسل الختامي: الشيت الأول + الشيت الثاني ---
         kpi_with_rep = final_kpi_table.copy()
-        insert_pos = min(11, len(kpi_with_rep.columns))  # العمود L
-        kpi_with_rep.insert(
-            insert_pos, "المندوب", agents_df["المندوب"].values
-        )
 
         buf_all = BytesIO()
         with pd.ExcelWriter(buf_all, engine="openpyxl") as writer:
