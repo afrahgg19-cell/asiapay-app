@@ -64,7 +64,6 @@ def apply_kpl_styling_to_sheet(ws):
         cell.font = cell_font
         if isinstance(cell.value, (int, float)):
           cell.alignment = Alignment(horizontal='right', vertical='center')
-          # تنسيق الأرقام تلقائياً بفواصل الآلاف (رقم حقيقي قابل للحساب)
           cell.number_format = '#,##0'
         else:
           cell.alignment = Alignment(horizontal='left', vertical='center')
@@ -77,35 +76,31 @@ def apply_kpl_styling_to_sheet(ws):
   ws.freeze_panes = 'A2'
 
 
-# --- دالة توحيد الشورت كود (تحل مشكلة تكرار نفس الكود بصيغ مختلفة) ---
+# --- دالة توحيد الشورت كود ---
 
 
 def normalize_short_code(val):
   """
-  توحيد شكل الشورت كود عشان نفس الكود ما يطلع مرتين بصيغ مختلفة
-  (مثال: 1900 و 1900.0 و "1900 " تصير كلها "1900")
+  توحيد شكل الشورت كود (1900 و 1900.0 و "1900 " تصير كلها "1900")
   """
   if val is None:
     return ""
   s = str(val).strip()
   if not s or s.lower() == "nan":
     return ""
-  # شيل أي فواصل عشرية زايدة ناتجة عن قراءة الرقم كـ float (1900.0 -> 1900)
   if s.endswith(".0"):
     s = s[:-2]
-  # شيل أي مسافات داخلية زايدة
   s = " ".join(s.split())
   return s.upper()
 
 
-# --- دالة بحث مرنة عن عمود معين بغض النظر عن المسافات/حالة الأحرف ---
+# --- دالة بحث مرنة عن عمود معين ---
 
 
 def find_col_flexible(df_columns, keywords):
   """
   تدور على أول عمود يحتوي أي كلمة من keywords، بعد تجاهل المسافات
-  والشرطات السفلية وحالة الأحرف (كبيرة/صغيرة).
-  مثال: "OrganizationArabicName" تُطابق الكلمة المفتاحية "arabicname"
+  والشرطات السفلية وحالة الأحرف.
   """
   for c in df_columns:
     c_norm = str(c).lower().replace(" ", "").replace("_", "").replace("-", "")
@@ -122,7 +117,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# استخدام الـ Tabs الأربعة العلوية
 tab1, tab2, tab3, tab_kpi = st.tabs([
     "💳 محفظة ASIA PAY",
     "📊 المقارنة بين شهرين",
@@ -131,22 +125,15 @@ tab1, tab2, tab3, tab_kpi = st.tabs([
 ])
 
 # ====================================================
-# طبقة قاعدة البيانات الاحترافية (خاصة بتبويب المحفظة فقط)
-# قاعدة بيانات دائمة على Supabase (PostgreSQL) - لا تنمسح أبداً
-# مهما صار ريستارت أو إعادة نشر أو نوم التطبيق على Streamlit Cloud
+# طبقة قاعدة البيانات (Supabase / PostgreSQL)
 # ====================================================
 
 
 @contextmanager
 def get_db_connection():
   """
-  Context manager احترافي للاتصال بقاعدة بيانات Supabase:
-  - يقرأ بيانات الاتصال من Streamlit Secrets (آمن، غير مخزّن بالكود)
-  - اتصال عادي (بدون RealDictCursor) حتى يتوافق مع pd.read_sql بشكل صحيح؛
-    أي دالة تحتاج قراءة الصف كـ dict تُمرر RealDictCursor بنفسها عند
-    إنشاء الـ cursor الخاص فيها (مثال: get_latest_balance)
-  - يسوي commit تلقائي عند النجاح، و rollback تلقائي عند حدوث خطأ
-  - يضمن إغلاق الاتصال دائماً حتى لو صار استثناء
+  Context manager للاتصال بقاعدة بيانات Supabase:
+  commit تلقائي عند النجاح، rollback عند الخطأ، وإغلاق الاتصال دائماً.
   """
   try:
     db_secrets = st.secrets["connections"]["supabase"]
@@ -176,7 +163,7 @@ def get_db_connection():
 
 
 def init_db():
-  """إنشاء الجدول والفهارس (Indexes) لتسريع الاستعلامات المتكررة"""
+  """إنشاء الجداول والفهارس"""
   try:
     with get_db_connection() as conn:
       cur = conn.cursor()
@@ -204,6 +191,16 @@ def init_db():
       cur.execute("""
           CREATE INDEX IF NOT EXISTS idx_wallet_debt_status
           ON wallet_operations (debt_status)
+      """)
+      # جدول تاركت المندوبين (جديد)
+      cur.execute("""
+          CREATE TABLE IF NOT EXISTS rep_targets (
+              rep_name TEXT PRIMARY KEY,
+              active_target INTEGER DEFAULT 0,
+              d100_target INTEGER DEFAULT 0,
+              bal_target INTEGER DEFAULT 0,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
       """)
       cur.close()
   except Exception as e:
@@ -270,7 +267,6 @@ def get_latest_balance():
 def insert_operation(
     op_type, amount, details, payment_method, debt_status, new_balance
 ):
-  """إدراج عملية جديدة بأمان (مع commit/rollback تلقائي عبر الـ context manager)"""
   try:
     with get_db_connection() as conn:
       cur = conn.cursor()
@@ -344,7 +340,51 @@ def mark_debt_paid(record_id):
     return False
 
 
-# --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
+# --- دوال تاركت المندوبين (جديدة) ---
+
+
+def load_targets():
+  try:
+    with get_db_connection() as conn:
+      return pd.read_sql("SELECT * FROM rep_targets", conn)
+  except Exception as e_t:
+    st.warning(f"⚠️ تعذر قراءة التاركت: {e_t}")
+    return pd.DataFrame(
+        columns=["rep_name", "active_target", "d100_target", "bal_target"]
+    )
+
+
+def save_targets(df_t):
+  try:
+    with get_db_connection() as conn:
+      cur = conn.cursor()
+      for _, r in df_t.iterrows():
+        cur.execute(
+            """
+            INSERT INTO rep_targets
+            (rep_name, active_target, d100_target, bal_target, updated_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (rep_name) DO UPDATE SET
+              active_target = EXCLUDED.active_target,
+              d100_target = EXCLUDED.d100_target,
+              bal_target = EXCLUDED.bal_target,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                str(r["المندوب"]),
+                int(r["تاركت النشطين"]),
+                int(r["تاركت حركه 100"]),
+                int(r["تاركت حفظ 100"]),
+            ),
+        )
+      cur.close()
+    return True
+  except Exception as e_s:
+    st.error(f"⚠️ خطأ أثناء حفظ التاركت: {e_s}")
+    return False
+
+
+# --- الحفاظ على الحالة في الذاكرة ---
 if "pivot_result" not in st.session_state:
   st.session_state["pivot_result"] = None
 if "combined_df" not in st.session_state:
@@ -639,7 +679,7 @@ with tab2:
         val_str = str(val).replace(",", "").strip()
         try:
           return float(val_str)
-        except:
+        except Exception:
           return 0.0
 
       combined_df["Cleaned_Amount"] = combined_df[amt_col].apply(clean_amount)
@@ -691,7 +731,7 @@ with tab2:
               "F"
               if "F" in combined_df.columns
               else (
-                  combined_df.columns
+                  combined_df.columns[1]
                   if len(combined_df.columns) > 1
                   else combined_df.columns[0]
               )
@@ -726,14 +766,13 @@ with tab2:
     df_to_save_pivot = st.session_state["pivot_result"].copy()
     if isinstance(df_to_save_pivot.columns, pd.MultiIndex):
       df_to_save_pivot.columns = [
-          "_".join([str(c) for c in col if col != ""])
+          "_".join([str(c) for c in col if c != ""])
           for col in df_to_save_pivot.columns
       ]
 
     with pd.ExcelWriter(buffer_pivot, engine="openpyxl") as writer:
       df_to_save_pivot.to_excel(writer, index=False, sheet_name="Comparison")
 
-    # تطبيق تنسيق KPL على ملف البايفوت
     buffer_pivot.seek(0)
     wb_p = openpyxl.load_workbook(buffer_pivot)
     apply_kpl_styling_to_sheet(wb_p.active)
@@ -779,7 +818,7 @@ with tab3:
             "F"
             if "F" in df_combined.columns
             else (
-                df_combined.columns
+                df_combined.columns[1]
                 if len(df_combined.columns) > 1
                 else df_combined.columns[0]
             )
@@ -837,7 +876,7 @@ with tab3:
     )
 
 # ====================================================
-# التبويب الرابع: KPI (دمج الحركات + الإكسل الاختياري + ورقة Wallet report)
+# التبويب الرابع: KPI
 # ====================================================
 with tab_kpi:
   st.markdown("### 📈 لوحة مؤشرات الأداء (KPI)")
@@ -966,7 +1005,6 @@ with tab_kpi:
           if g_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
-      # G_upper_key هو نفسه الكود الموحّد (نفس دالة التوحيد لكل المصادر)
       work_kpi["G_upper_key"] = work_kpi["G_clean"]
       work_kpi["F_clean"] = (
           kpi_df[f_col_name].astype(str).str.strip()
@@ -978,8 +1016,6 @@ with tab_kpi:
           if b_col_name in kpi_df.columns
           else pd.Series([""] * len(kpi_df))
       )
-      # عمود Reason Type (C) - يُستخدم لتصنيف عمليات
-      # "Organization Intra Account Transfer-Top to Child"
       work_kpi["C_clean"] = (
           kpi_df[c_col_name].astype(str).str.strip()
           if c_col_name in kpi_df.columns
@@ -1000,7 +1036,6 @@ with tab_kpi:
           cleaned_t_numeric, errors="coerce"
       ).fillna(0.0)
 
-      # شيل الصفوف اللي طلع كودها فاضي بعد التوحيد (صفوف فارغة/تالفة)
       work_kpi = work_kpi[work_kpi["G_upper_key"] != ""]
 
       target_ops = [
@@ -1014,8 +1049,6 @@ with tab_kpi:
           "Electronic Vouchers",
       ]
 
-      # --- تجميع مبالغ "Organization Intra Account Transfer-Top to Child"
-      # مصنفة حسب الشورت كود الموحّد ---
       b2b_summary = (
           work_kpi[
               work_kpi["C_clean"].str.lower()
@@ -1031,7 +1064,6 @@ with tab_kpi:
           ["G_upper_key", "F_clean"], dropna=False
       ):
         g_str = str(g_v).strip()
-        # لو نفس الكود عنده أكثر من اسم بالملف الأصلي، ندمج كل حركاته سوا
         if g_str in kpi_grouped:
           prev_f, prev_grp = kpi_grouped[g_str]
           kpi_grouped[g_str] = (
@@ -1043,7 +1075,7 @@ with tab_kpi:
 
       all_short_codes = set(kpi_grouped.keys())
 
-      # --- قراءة الدمج من الإكسل الاختياري ---
+      # --- قراءة الإكسل الاختياري (الوكلاء + المندوب) ---
       opt_df = None
       opt_join_col = None
       opt_name_col = None
@@ -1053,24 +1085,19 @@ with tab_kpi:
         try:
           opt_df = pd.read_excel(rep_uploaded_file)
 
-          # عمود الشورت كود بالملف الاختياري
           opt_join_col = find_col_flexible(
               opt_df.columns, ["shortcode", "كود"]
           )
           if opt_join_col is None and len(opt_df.columns) > 0:
             opt_join_col = opt_df.columns[0]
 
-          # عمود الاسم بالملف الاختياري (يُستخدم كمصدر رئيسي للاسم) -
-          # بحث مرن يطابق "OrganizationArabicName" أو "Arabic Name" أو غيرها
           opt_name_col = find_col_flexible(
               opt_df.columns,
               ["organizationarabicname", "arabicname", "الاسم", "name"],
           )
-          # عمود العنوان بالملف الاختياري
           opt_address_col = find_col_flexible(
               opt_df.columns, ["address", "العنوان"]
           )
-          # عمود رقم الهاتف بالملف الاختياري
           opt_phone_col = find_col_flexible(
               opt_df.columns, ["msisdn", "phone", "mobile", "هاتف"]
           )
@@ -1123,8 +1150,7 @@ with tab_kpi:
           st.warning(f"⚠️ ملاحظة قراءة ملف الرصيد التراكمي: {e_cum}")
           cum_prev_map = {}
 
-      # --- تاركت 3 مليون بناءً على الرصيد التراكمي ---
-      # 3 مليون خلال 30 يوم = 100 الف يومياً (المسار المثالي)
+      # --- تاركت 3 مليون (100 الف يومياً) ---
       cum_target_val = 3000000.0
       cum_daily_pace = cum_target_val / 30.0
       cum_expected_now = cum_daily_pace * float(cum_day_num)
@@ -1150,9 +1176,6 @@ with tab_kpi:
               columns=["G_clean", "F_clean", "B_clean", "C_clean", "T_num"]
           )
 
-        # اسم المكتب: يُؤخذ أولاً من عمود الاسم بالإكسل الاختياري
-        # (اللي تم لقطته بالبحث المرن)، ولو فاضي يرجع للاسم من الملف
-        # الأصلي كحل احتياطي
         name_from_opt = ""
         if opt_name_col is not None:
           raw_name_val = opt_data_map.get(g_v, {}).get(opt_name_col, "")
@@ -1161,7 +1184,6 @@ with tab_kpi:
           )
         office_name = name_from_opt if name_from_opt else f_v
 
-        # العنوان ورقم الهاتف: من الإكسل الاختياري عبر البحث المرن
         address_val = ""
         if opt_address_col is not None:
           raw_addr = opt_data_map.get(g_v, {}).get(opt_address_col, "")
@@ -1172,8 +1194,6 @@ with tab_kpi:
           raw_phone = opt_data_map.get(g_v, {}).get(opt_phone_col, "")
           phone_val = "" if pd.isna(raw_phone) else str(raw_phone).strip()
 
-        # مجموع "Organization Intra Account Transfer-Top to Child" لهذا
-        # الشورت كود، مأخوذ من b2b_summary المُجهّز مسبقاً
         total_b2b_sum = b2b_summary.get(g_v, 0.0)
 
         if not grp.empty:
@@ -1181,8 +1201,6 @@ with tab_kpi:
         else:
           high_t_count = 0
 
-        # رقم حقيقي (float) بدل نص، حتى يبقى قابل للحساب والفلترة بالإكسل
-        # مباشرة، وتنسيق الفواصل يصير من خصائص الإكسل (number_format)
         formatted_b2b = float(total_b2b_sum)
 
         w_bal = wallet_balance_map.get(g_v, 0.0)
@@ -1196,7 +1214,6 @@ with tab_kpi:
             "حركه 100 الف": "Done" if total_b2b_sum > 99000 else "",
             "حركه 3 مليون": "Done" if total_b2b_sum > 2999000 else "",
             "اربع حركات": "Done" if high_t_count >= 4 else "",
-            # رقم حقيقي هنا أيضاً لنفس السبب
             "رصيد المحفظة": (
                 float(w_bal) if isinstance(w_bal, (int, float)) else w_bal
             ),
@@ -1208,7 +1225,6 @@ with tab_kpi:
           cum_total = float(cum_prev_map.get(g_v, 0.0)) + w_today
           row_item["الرصيد التراكمي"] = cum_total
 
-          # حركه 3 مليون تعتمد هنا على الرصيد التراكمي
           if cum_total >= cum_target_val:
             row_item["حركه 3 مليون"] = "Done"
             row_item["وضع المحفظة"] = "Done"
@@ -1222,7 +1238,6 @@ with tab_kpi:
               0.0, cum_expected_now - cum_total
           )
 
-        # دمج أي أعمدة إضافية أخرى من الإكسل الاختياري إن وجدت
         for c_k, c_v in opt_data_map.get(g_v, {}).items():
           if c_k not in row_item:
             row_item[c_k] = c_v
@@ -1231,7 +1246,6 @@ with tab_kpi:
           if not grp.empty:
             count_val = grp["B_clean"].str.lower() == op.lower()
             if op == "E-money Deposit":
-              # مجموع المبالغ من عمود T بدل العدد
               row_item[f"عدد ({op})"] = float(
                   grp.loc[count_val, "T_num"].sum()
               )
@@ -1244,8 +1258,6 @@ with tab_kpi:
 
       final_kpi_table = pd.DataFrame(kpi_rows_list)
 
-      # الترتيب النهائي المطلوب: كود المكتب - الاسم - العنوان - الهاتف -
-      # مجموع المبالغ - الحركات - رصيد المحفظة - ثم بقية الأعمدة
       explicit_order = [
           "Short Code",
           "Organiztione Arabic name",
@@ -1257,7 +1269,6 @@ with tab_kpi:
           "اربع حركات",
           "رصيد المحفظة",
       ]
-      # أعمدة الرصيد التراكمي تكون آخر شي بالجدول
       last_cols_order = [
           "الرصيد التراكمي",
           "وضع المحفظة",
@@ -1276,7 +1287,7 @@ with tab_kpi:
           existing_cols + remaining_cols + last_cols
       ]
 
-      # حذف الأعمدة J و K و L (الأعمدة رقم 10 و 11 و 12) من التقرير
+      # حذف الأعمدة J و K و L (رقم 10 و 11 و 12) من التقرير
       cols_to_drop_jkl = [
           c for i, c in enumerate(final_kpi_table.columns) if i in (9, 10, 11)
       ]
@@ -1288,7 +1299,7 @@ with tab_kpi:
       )
       st.dataframe(final_kpi_table, use_container_width=True)
 
-      # --- تجهيز اسم ملف التحميل: اسم الملف الأصلي + تاريخ أمس (يوم-شهر) ---
+      # --- اسم ملف التحميل: اسم الملف الأصلي + تاريخ أمس ---
       original_name_no_ext = os.path.splitext(kpi_uploaded_file.name)[0]
       yesterday_date = pd.Timestamp.now() - pd.Timedelta(days=1)
       date_suffix = f"{yesterday_date.day}-{yesterday_date.month}"
@@ -1299,14 +1310,13 @@ with tab_kpi:
       df_to_save_kpi = final_kpi_table.copy()
       if isinstance(df_to_save_kpi.columns, pd.MultiIndex):
         df_to_save_kpi.columns = [
-            "_".join([str(c) for c in col if col != ""])
+            "_".join([str(c) for c in col if c != ""])
             for col in df_to_save_kpi.columns
         ]
 
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
         df_to_save_kpi.to_excel(writer, index=False, sheet_name="KPI_Report")
 
-      # تطبيق تنسيق KPL على تقرير الـ KPI النهائي
       buffer_kpi.seek(0)
       wb_k = openpyxl.load_workbook(buffer_kpi)
       apply_kpl_styling_to_sheet(wb_k.active)
@@ -1323,6 +1333,223 @@ with tab_kpi:
           ),
           key="download_kpi_excel_full_merged",
       )
+
+      # ====================================================
+      # متابعة المندوبين (شيت ثاني بنفس الإكسل الختامي)
+      # ====================================================
+      st.markdown("---")
+      st.subheader("🎯 متابعة المندوبين: التاركت مقابل المنجز")
+
+      if opt_df is None:
+        st.info(
+            "📌 ارفع إكسل الوكلاء (شورت كود + اسم المندوب) حتى تظهر المتابعة."
+        )
+      else:
+        rep_col = find_col_flexible(
+            opt_df.columns,
+            ["مندوب", "representative", "rep", "salesman", "supervisor",
+             "مشرف", "موظف"],
+        )
+        if rep_col is None:
+          rep_col = st.selectbox(
+              "ما لقيت عمود المندوب تلقائياً، اختره:",
+              list(opt_df.columns),
+              key="rep_col_manual",
+          )
+
+        rep_map = (
+            opt_df[opt_df["_opt_key"] != ""]
+            .drop_duplicates("_opt_key")
+            .set_index("_opt_key")[rep_col]
+            .astype(str).str.strip()
+            .to_dict()
+        )
+
+        agents_df = final_kpi_table.copy()
+        agents_df["_key"] = agents_df["Short Code"].apply(normalize_short_code)
+        agents_df["المندوب"] = agents_df["_key"].map(rep_map).fillna("غير محدد")
+
+        # --- المؤشرات الثلاثة ---
+        agents_df["_active"] = (agents_df["اربع حركات"] == "Done").astype(int)
+        agents_df["_d100"] = (agents_df["حركه 100 الف"] == "Done").astype(int)
+        if "وضع المحفظة" in agents_df.columns:
+          agents_df["_bal100"] = (
+              agents_df["وضع المحفظة"].isin(["Done", "مثالي"])
+          ).astype(int)
+        else:
+          agents_df["_bal100"] = (
+              agents_df["حركه 3 مليون"] == "Done"
+          ).astype(int)
+
+        summary = (
+            agents_df.groupby("المندوب")
+            .agg(
+                عدد_الوكلاء=("Short Code", "count"),
+                النشطين_المنجز=("_active", "sum"),
+                حركه_100_المنجز=("_d100", "sum"),
+                حفظ_100_المنجز=("_bal100", "sum"),
+            )
+            .reset_index()
+        )
+
+        # --- التاركت: من Supabase ---
+        saved = load_targets()
+        saved_map = (
+            {r["rep_name"]: r for _, r in saved.iterrows()}
+            if not saved.empty
+            else {}
+        )
+
+        rows_t = []
+        for rep in summary["المندوب"]:
+          if rep in saved_map:
+            s = saved_map[rep]
+            rows_t.append({
+                "المندوب": rep,
+                "تاركت النشطين": int(s["active_target"]),
+                "تاركت حركه 100": int(s["d100_target"]),
+                "تاركت حفظ 100": int(s["bal_target"]),
+            })
+          else:
+            rows_t.append({
+                "المندوب": rep,
+                "تاركت النشطين": 0,
+                "تاركت حركه 100": 0,
+                "تاركت حفظ 100": 0,
+            })
+        targets_df = pd.DataFrame(rows_t)
+
+        auto_fill = st.checkbox(
+            "⚙️ حساب التاركت تلقائياً من تاركت النشطين "
+            "(حفظ 100 = 70% ، حركه 100 = 60% من حفظ 100)",
+            value=False,
+            key="auto_target_chk",
+        )
+        if auto_fill:
+          targets_df["تاركت حفظ 100"] = (
+              targets_df["تاركت النشطين"] * 0.7
+          ).round().astype(int)
+          targets_df["تاركت حركه 100"] = (
+              targets_df["تاركت حفظ 100"] * 0.6
+          ).round().astype(int)
+
+        st.write("✏️ اكتب تاركت كل مندوب ثم اضغط حفظ:")
+        edited_targets = st.data_editor(
+            targets_df,
+            use_container_width=True,
+            num_rows="fixed",
+            key="targets_editor_db",
+        )
+
+        if st.button("💾 حفظ التاركت بقاعدة البيانات", key="save_targets_btn"):
+          if save_targets(edited_targets):
+            st.success("✅ تم حفظ التاركت، ما يضيع بعد الريفريش.")
+
+        # --- حساب النسب ---
+        result = summary.merge(edited_targets, on="المندوب", how="left")
+
+        def pct(done, target):
+          return (
+              round(done / target * 100, 1)
+              if target and target > 0
+              else None
+          )
+
+        result["نسبة النشطين %"] = [
+            pct(d, t)
+            for d, t in zip(result["النشطين_المنجز"], result["تاركت النشطين"])
+        ]
+        result["نسبة حركه 100 %"] = [
+            pct(d, t)
+            for d, t in zip(result["حركه_100_المنجز"], result["تاركت حركه 100"])
+        ]
+        result["نسبة حفظ 100 %"] = [
+            pct(d, t)
+            for d, t in zip(result["حفظ_100_المنجز"], result["تاركت حفظ 100"])
+        ]
+
+        pct_cols = ["نسبة النشطين %", "نسبة حركه 100 %", "نسبة حفظ 100 %"]
+        result["النسبة الكلية %"] = (
+            result[pct_cols].astype(float).mean(axis=1).round(1)
+        )
+
+        result = result[[
+            "المندوب", "عدد_الوكلاء",
+            "تاركت النشطين", "النشطين_المنجز", "نسبة النشطين %",
+            "تاركت حركه 100", "حركه_100_المنجز", "نسبة حركه 100 %",
+            "تاركت حفظ 100", "حفظ_100_المنجز", "نسبة حفظ 100 %",
+            "النسبة الكلية %",
+        ]]
+
+        all_pct_cols = pct_cols + ["النسبة الكلية %"]
+
+        def color_pct(v):
+          if v is None or pd.isna(v):
+            return ""
+          if v >= 100:
+            return "background-color:#C6EFCE;color:#006100"
+          if v >= 80:
+            return "background-color:#FFEB9C;color:#9C5700"
+          return "background-color:#FFC7CE;color:#9C0006"
+
+        st.dataframe(
+            result.style.map(color_pct, subset=all_pct_cols),
+            use_container_width=True,
+        )
+
+        # --- الإكسل الختامي: الشيت الأول + الشيت الثاني ---
+        kpi_with_rep = final_kpi_table.copy()
+        insert_pos = min(11, len(kpi_with_rep.columns))  # العمود L
+        kpi_with_rep.insert(
+            insert_pos, "المندوب", agents_df["المندوب"].values
+        )
+
+        buf_all = BytesIO()
+        with pd.ExcelWriter(buf_all, engine="openpyxl") as writer:
+          kpi_with_rep.to_excel(writer, index=False, sheet_name="KPI_Report")
+          result.to_excel(writer, index=False, sheet_name="Reps_KPI")
+        buf_all.seek(0)
+
+        wb_all = openpyxl.load_workbook(buf_all)
+        apply_kpl_styling_to_sheet(wb_all["KPI_Report"])
+        ws_r = wb_all["Reps_KPI"]
+        apply_kpl_styling_to_sheet(ws_r)
+
+        green = PatternFill(
+            start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"
+        )
+        yellow = PatternFill(
+            start_color="FFEB9C", end_color="FFEB9C", fill_type="solid"
+        )
+        red = PatternFill(
+            start_color="FFC7CE", end_color="FFC7CE", fill_type="solid"
+        )
+        hdrs = [c.value for c in ws_r[1]]
+        for h in all_pct_cols:
+          ci = hdrs.index(h) + 1
+          for r in range(2, ws_r.max_row + 1):
+            cell = ws_r.cell(row=r, column=ci)
+            if isinstance(cell.value, (int, float)):
+              cell.number_format = '0.0"%"'
+              cell.fill = (
+                  green if cell.value >= 100
+                  else yellow if cell.value >= 80
+                  else red
+              )
+
+        buf_final = BytesIO()
+        wb_all.save(buf_final)
+        buf_final.seek(0)
+
+        st.download_button(
+            label="📥 تحميل الإكسل الختامي (KPI + شيت المندوبين)",
+            data=buf_final,
+            file_name=f"{original_name_no_ext} {date_suffix}.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            key="download_final_with_reps",
+        )
 
     except Exception as err:
       st.error(f"⚠️ خطأ أثناء معالجة ملف الـ KPI: {err}")
