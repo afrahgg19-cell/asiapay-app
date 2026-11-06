@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from copy import copy
 from io import BytesIO
 import os
 import openpyxl
@@ -1398,6 +1399,39 @@ with tab_kpi:
             "نسبة حركه 3 مليون (%)",
         ]
 
+      # --- تاركت إيداعات شركة علاء سيل (MA0012) من عدد (E-money Deposit) ---
+      # يُحسب قبل حذف الأعمدة J و K و L
+      dep_target_code = "MA0012"
+      dep_target_total = 1000000000.0
+      dep_expected_now = (dep_target_total / 30.0) * float(cum_day_num)
+      dep_amount = 0.0
+      dep_name = "علاء سيل"
+      dep_match = final_kpi_table[final_kpi_table["Short Code"] == dep_target_code]
+      if not dep_match.empty:
+        if "عدد (E-money Deposit)" in dep_match.columns:
+          dep_amount = float(dep_match["عدد (E-money Deposit)"].iloc[0])
+        found_name = str(dep_match["Organiztione Arabic name"].iloc[0]).strip()
+        if found_name and found_name.lower() != "nan":
+          dep_name = found_name
+
+      if dep_amount >= dep_target_total:
+        dep_status = "Done"
+      elif dep_amount >= dep_expected_now:
+        dep_status = "مثالي"
+      else:
+        dep_status = "لازم تعوض"
+
+      dep_summary_df = pd.DataFrame([{
+          "الشورت كود": dep_target_code,
+          "اسم الشركة": dep_name,
+          "تاركت الإيداعات": dep_target_total,
+          "المطلوب لحد اليوم": dep_expected_now,
+          "الإيداع الحالي": dep_amount,
+          "الحالة": dep_status,
+          "المبلغ المطلوب تعويضه": max(0.0, dep_expected_now - dep_amount),
+          "نسبة الإنجاز (%)": round(dep_amount / dep_target_total * 100.0, 1),
+      }])
+
       # حذف الأعمدة J و K و L (الأعمدة رقم 10 و 11 و 12) من التقرير
       cols_to_drop_jkl = [
           c for i, c in enumerate(final_kpi_table.columns) if i in (9, 10, 11)
@@ -1469,6 +1503,9 @@ with tab_kpi:
             " الاختياري."
         )
 
+      st.subheader("💰 تاركت إيداعات علاء سيل (MA0012)")
+      st.dataframe(dep_summary_df, use_container_width=True)
+
       # --- تجهيز اسم ملف التحميل: اسم الملف الأصلي + تاريخ أمس (يوم-شهر) ---
       original_name_no_ext = os.path.splitext(kpi_uploaded_file.name)[0]
       yesterday_date = pd.Timestamp.now() - pd.Timedelta(days=1)
@@ -1490,6 +1527,16 @@ with tab_kpi:
           emp_summary_df.to_excel(
               writer, index=False, sheet_name="Employees_Target"
           )
+        # جدول إيداعات علاء سيل بنفس الشيت، تحت جدول الموظفين بسطر فاضي
+        dep_start_row = (
+            len(emp_summary_df) + 2 if emp_summary_df is not None else 0
+        )
+        dep_summary_df.to_excel(
+            writer,
+            index=False,
+            sheet_name="Employees_Target",
+            startrow=dep_start_row,
+        )
 
       # تطبيق تنسيق KPL على تقرير الـ KPI النهائي
       buffer_kpi.seek(0)
@@ -1498,10 +1545,22 @@ with tab_kpi:
       if "Employees_Target" in wb_k.sheetnames:
         ws_emp = wb_k["Employees_Target"]
         apply_kpl_styling_to_sheet(ws_emp)
-        # أعمدة النسب (5 و 8) تبقى بخانة عشرية وحدة
-        for r_idx in range(2, ws_emp.max_row + 1):
+        emp_rows_count = (
+            len(emp_summary_df) if emp_summary_df is not None else 0
+        )
+        # أعمدة النسب (5 و 8) تبقى بخانة عشرية وحدة (جدول الموظفين فقط)
+        for r_idx in range(2, emp_rows_count + 2):
           for c_idx in (5, 8):
             ws_emp.cell(row=r_idx, column=c_idx).number_format = "0.0"
+
+        # جدول إيداعات علاء سيل: ترويسة بنفس تنسيق الترويسة ونسبته بخانة عشرية
+        dep_header_row = emp_rows_count + 3 if emp_summary_df is not None else 1
+        if emp_summary_df is not None:
+          for c_idx in range(1, len(dep_summary_df.columns) + 1):
+            ws_emp.cell(row=dep_header_row, column=c_idx)._style = copy(
+                ws_emp.cell(row=1, column=c_idx)._style
+            )
+        ws_emp.cell(row=dep_header_row + 1, column=8).number_format = "0.0"
       buffer_kpi = BytesIO()
       wb_k.save(buffer_kpi)
       buffer_kpi.seek(0)
