@@ -344,6 +344,73 @@ def mark_debt_paid(record_id):
     return False
 
 
+# --- تاركت الموظفين الشهري (ينحفظ بقاعدة البيانات ويتصفر أول كل شهر) ---
+
+
+def get_current_month_key():
+  """مفتاح الشهر الحالي (مثال 2026-11)، تغيّره يعني تصفير التاركت تلقائياً"""
+  try:
+    return pd.Timestamp.now(tz="Asia/Baghdad").strftime("%Y-%m")
+  except Exception:
+    return pd.Timestamp.now().strftime("%Y-%m")
+
+
+def ensure_targets_table(cur):
+  cur.execute("""
+      CREATE TABLE IF NOT EXISTS employee_targets (
+          month_key TEXT NOT NULL,
+          employee_name TEXT NOT NULL,
+          target_100k REAL NOT NULL DEFAULT 0,
+          target_3m REAL NOT NULL DEFAULT 0,
+          PRIMARY KEY (month_key, employee_name)
+      )
+  """)
+
+
+def load_employee_targets(month_key):
+  """يرجع قاموس: اسم الموظف -> (تاركت 100 الف، تاركت 3 مليون)"""
+  try:
+    with get_db_connection() as conn:
+      cur = conn.cursor()
+      ensure_targets_table(cur)
+      cur.execute(
+          "SELECT employee_name, target_100k, target_3m"
+          " FROM employee_targets WHERE month_key = %s",
+          (month_key,),
+      )
+      rows = cur.fetchall()
+      cur.close()
+    return {r[0]: (float(r[1]), float(r[2])) for r in rows}
+  except Exception as e:
+    st.error(f"⚠️ خطأ أثناء تحميل تاركت الموظفين: {e}")
+    return {}
+
+
+def save_employee_targets(month_key, rows):
+  """rows: قائمة من (اسم الموظف، تاركت 100 الف، تاركت 3 مليون)"""
+  try:
+    with get_db_connection() as conn:
+      cur = conn.cursor()
+      ensure_targets_table(cur)
+      for name, t100, t3m in rows:
+        cur.execute(
+            """
+                INSERT INTO employee_targets
+                (month_key, employee_name, target_100k, target_3m)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (month_key, employee_name)
+                DO UPDATE SET target_100k = EXCLUDED.target_100k,
+                              target_3m = EXCLUDED.target_3m
+            """,
+            (month_key, name, t100, t3m),
+        )
+      cur.close()
+    return True
+  except Exception as e:
+    st.error(f"⚠️ خطأ أثناء حفظ تاركت الموظفين: {e}")
+    return False
+
+
 # --- الحفاظ على حالة الجرد الكلي ومقارنة الشهور في الذاكرة ---
 if "pivot_result" not in st.session_state:
   st.session_state["pivot_result"] = None
@@ -1276,6 +1343,61 @@ with tab_kpi:
           existing_cols + remaining_cols + last_cols
       ]
 
+      # --- ملخص تاركت الموظفين (حسب حركه 100 الف وحركه 3 مليون) ---
+      # يُحسب قبل حذف الأعمدة J و K و L حتى لا يضيع عمود اسم الموظف
+      emp_summary_df = None
+      emp_col_name = find_col_flexible(
+          final_kpi_table.columns,
+          ["اسمالموظف", "الموظف", "employee", "staff", "مندوب"],
+      )
+      if emp_col_name is not None:
+        emp_work = final_kpi_table.copy()
+        emp_work["_emp"] = (
+            emp_work[emp_col_name].fillna("").astype(str).str.strip()
+        )
+        emp_work.loc[emp_work["_emp"] == "", "_emp"] = "بدون موظف"
+        emp_work["_d100"] = (emp_work["حركه 100 الف"] == "Done").astype(int)
+        emp_work["_d3m"] = (emp_work["حركه 3 مليون"] == "Done").astype(int)
+        emp_summary_df = (
+            emp_work.groupby("_emp")
+            .agg(
+                offices=("_emp", "count"),
+                d100=("_d100", "sum"),
+                d3m=("_d3m", "sum"),
+            )
+            .reset_index()
+        )
+        # التاركتات المحفوظة للشهر الحالي (تتصفر تلقائياً أول كل شهر)
+        emp_month_key = get_current_month_key()
+        saved_targets = load_employee_targets(emp_month_key)
+        emp_summary_df["t100"] = emp_summary_df["_emp"].apply(
+            lambda n: saved_targets.get(n, (0.0, 0.0))[0]
+        )
+        emp_summary_df["t3m"] = emp_summary_df["_emp"].apply(
+            lambda n: saved_targets.get(n, (0.0, 0.0))[1]
+        )
+        emp_summary_df["p100"] = [
+            round(d / t * 100.0, 1) if t > 0 else 0.0
+            for d, t in zip(emp_summary_df["d100"], emp_summary_df["t100"])
+        ]
+        emp_summary_df["p3m"] = [
+            round(d / t * 100.0, 1) if t > 0 else 0.0
+            for d, t in zip(emp_summary_df["d3m"], emp_summary_df["t3m"])
+        ]
+        emp_summary_df = emp_summary_df[
+            ["_emp", "offices", "t100", "d100", "p100", "t3m", "d3m", "p3m"]
+        ]
+        emp_summary_df.columns = [
+            "اسم الموظف",
+            "عدد المكاتب",
+            "تاركت حركه 100 الف",
+            "المحقق حركه 100 الف",
+            "نسبة حركه 100 الف (%)",
+            "تاركت حركه 3 مليون",
+            "المحقق حركه 3 مليون",
+            "نسبة حركه 3 مليون (%)",
+        ]
+
       # حذف الأعمدة J و K و L (الأعمدة رقم 10 و 11 و 12) من التقرير
       cols_to_drop_jkl = [
           c for i, c in enumerate(final_kpi_table.columns) if i in (9, 10, 11)
@@ -1287,6 +1409,65 @@ with tab_kpi:
           " المحفظة بالترتيب المطلوب)"
       )
       st.dataframe(final_kpi_table, use_container_width=True)
+
+      st.subheader("🎯 تاركت الموظفين (حسب حركه 100 الف وحركه 3 مليون)")
+      if emp_summary_df is not None:
+        st.dataframe(emp_summary_df, use_container_width=True)
+
+        with st.expander(
+            "✏️ إدخال / تعديل تاركت الموظفين (ينحفظ لحد يوم 1 من الشهر الجاي)"
+        ):
+          st.caption(
+              f"تاركت شهر {emp_month_key}: تدخله مرة وحدة بالشهر وينحفظ،"
+              " وأول يوم من الشهر الجاي يتصفر تلقائياً. الرقم هو عدد المكاتب"
+              " المطلوبة."
+          )
+          editor_src = emp_summary_df[
+              emp_summary_df["اسم الموظف"] != "بدون موظف"
+          ][["اسم الموظف", "تاركت حركه 100 الف", "تاركت حركه 3 مليون"]]
+          editor_src = editor_src.reset_index(drop=True)
+          if editor_src.empty:
+            st.info("لا يوجد موظفين لإدخال تاركت لهم.")
+          else:
+            with st.form("emp_targets_form"):
+              edited_targets = st.data_editor(
+                  editor_src,
+                  hide_index=True,
+                  use_container_width=True,
+                  disabled=["اسم الموظف"],
+                  num_rows="fixed",
+                  column_config={
+                      "تاركت حركه 100 الف": st.column_config.NumberColumn(
+                          min_value=0, step=1, format="%d"
+                      ),
+                      "تاركت حركه 3 مليون": st.column_config.NumberColumn(
+                          min_value=0, step=1, format="%d"
+                      ),
+                  },
+                  key="emp_targets_editor",
+              )
+              submit_targets = st.form_submit_button("💾 حفظ التاركت")
+            if submit_targets:
+
+              def _num(v):
+                return 0.0 if pd.isna(v) else float(v)
+
+              rows_to_save = [
+                  (
+                      str(r["اسم الموظف"]),
+                      _num(r["تاركت حركه 100 الف"]),
+                      _num(r["تاركت حركه 3 مليون"]),
+                  )
+                  for _, r in edited_targets.iterrows()
+              ]
+              if save_employee_targets(emp_month_key, rows_to_save):
+                st.success("تم حفظ التاركت بنجاح!")
+                st.rerun()
+      else:
+        st.info(
+            "لم يتم العثور على عمود اسم الموظف، تأكد إنه موجود بالإكسل"
+            " الاختياري."
+        )
 
       # --- تجهيز اسم ملف التحميل: اسم الملف الأصلي + تاريخ أمس (يوم-شهر) ---
       original_name_no_ext = os.path.splitext(kpi_uploaded_file.name)[0]
@@ -1305,11 +1486,22 @@ with tab_kpi:
 
       with pd.ExcelWriter(buffer_kpi, engine="openpyxl") as writer:
         df_to_save_kpi.to_excel(writer, index=False, sheet_name="KPI_Report")
+        if emp_summary_df is not None:
+          emp_summary_df.to_excel(
+              writer, index=False, sheet_name="Employees_Target"
+          )
 
       # تطبيق تنسيق KPL على تقرير الـ KPI النهائي
       buffer_kpi.seek(0)
       wb_k = openpyxl.load_workbook(buffer_kpi)
-      apply_kpl_styling_to_sheet(wb_k.active)
+      apply_kpl_styling_to_sheet(wb_k["KPI_Report"])
+      if "Employees_Target" in wb_k.sheetnames:
+        ws_emp = wb_k["Employees_Target"]
+        apply_kpl_styling_to_sheet(ws_emp)
+        # أعمدة النسب (5 و 8) تبقى بخانة عشرية وحدة
+        for r_idx in range(2, ws_emp.max_row + 1):
+          for c_idx in (5, 8):
+            ws_emp.cell(row=r_idx, column=c_idx).number_format = "0.0"
       buffer_kpi = BytesIO()
       wb_k.save(buffer_kpi)
       buffer_kpi.seek(0)
