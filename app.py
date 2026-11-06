@@ -116,6 +116,21 @@ def find_col_flexible(df_columns, keywords):
   return None
 
 
+# --- دالة عرض الأرقام بفواصل الآلاف على الشاشة (مثال 10,000,000) ---
+
+
+def style_with_commas(df_in):
+  """تنسيق الأعمدة الرقمية بفواصل الآلاف، والنسب (%) بخانة عشرية وحدة"""
+  num_cols = [
+      c for c in df_in.columns if pd.api.types.is_numeric_dtype(df_in[c])
+  ]
+  pct_cols = [c for c in num_cols if "%" in str(c)]
+  int_cols = [c for c in num_cols if c not in pct_cols]
+  fmt = {c: "{:,.0f}" for c in int_cols}
+  fmt.update({c: "{:,.1f}" for c in pct_cols})
+  return df_in.style.format(fmt, na_rep="")
+
+
 # --- لوحة التحكم في الأعلى ---
 st.markdown(
     "<h2 style='text-align: center; color: #1E3A8A;'>💰 نظام إدارة المحفظة"
@@ -1442,11 +1457,15 @@ with tab_kpi:
           "📋 نتيجة تقرير الـ KPI (دمج شامل للحركات + الإكسل الاختياري +"
           " المحفظة بالترتيب المطلوب)"
       )
-      st.dataframe(final_kpi_table, use_container_width=True)
+      st.dataframe(
+          style_with_commas(final_kpi_table), use_container_width=True
+      )
 
       st.subheader("🎯 تاركت الموظفين (حسب حركه 100 الف وحركه 3 مليون)")
       if emp_summary_df is not None:
-        st.dataframe(emp_summary_df, use_container_width=True)
+        st.dataframe(
+            style_with_commas(emp_summary_df), use_container_width=True
+        )
 
         with st.expander(
             "✏️ إدخال / تعديل تاركت الموظفين (ينحفظ لحد يوم 1 من الشهر الجاي)"
@@ -1504,7 +1523,9 @@ with tab_kpi:
         )
 
       st.subheader("💰 تاركت إيداعات علاء سيل (MA0012)")
-      st.dataframe(dep_summary_df, use_container_width=True)
+      st.dataframe(
+          style_with_commas(dep_summary_df), use_container_width=True
+      )
 
       # --- تجهيز اسم ملف التحميل: اسم الملف الأصلي + تاريخ أمس (يوم-شهر) ---
       original_name_no_ext = os.path.splitext(kpi_uploaded_file.name)[0]
