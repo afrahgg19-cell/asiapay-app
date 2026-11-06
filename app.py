@@ -1414,38 +1414,51 @@ with tab_kpi:
             "نسبة حركه 3 مليون (%)",
         ]
 
-      # --- تاركت إيداعات شركة علاء سيل (MA0012) من عدد (E-money Deposit) ---
+      # --- تاركت إيداعات الشركات من عدد (E-money Deposit) ---
       # يُحسب قبل حذف الأعمدة J و K و L
-      dep_target_code = "MA0012"
       dep_target_total = 1000000000.0
       dep_expected_now = (dep_target_total / 30.0) * float(cum_day_num)
-      dep_amount = 0.0
-      dep_name = "علاء سيل"
-      dep_match = final_kpi_table[final_kpi_table["Short Code"] == dep_target_code]
-      if not dep_match.empty:
-        if "عدد (E-money Deposit)" in dep_match.columns:
-          dep_amount = float(dep_match["عدد (E-money Deposit)"].iloc[0])
-        found_name = str(dep_match["Organiztione Arabic name"].iloc[0]).strip()
-        if found_name and found_name.lower() != "nan":
-          dep_name = found_name
+      dep_companies = [
+          ("MA0012", "علاء سيل"),
+          ("MA0026", "الغد الموعود"),
+      ]
+      dep_rows = []
+      for dep_target_code, dep_default_name in dep_companies:
+        dep_amount = 0.0
+        dep_name = dep_default_name
+        dep_match = final_kpi_table[
+            final_kpi_table["Short Code"] == dep_target_code
+        ]
+        if not dep_match.empty:
+          if "عدد (E-money Deposit)" in dep_match.columns:
+            dep_amount = float(dep_match["عدد (E-money Deposit)"].iloc[0])
+          found_name = str(
+              dep_match["Organiztione Arabic name"].iloc[0]
+          ).strip()
+          if found_name and found_name.lower() != "nan":
+            dep_name = found_name
 
-      if dep_amount >= dep_target_total:
-        dep_status = "Done"
-      elif dep_amount >= dep_expected_now:
-        dep_status = "مثالي"
-      else:
-        dep_status = "لازم تعوض"
+        if dep_amount >= dep_target_total:
+          dep_status = "Done"
+        elif dep_amount >= dep_expected_now:
+          dep_status = "مثالي"
+        else:
+          dep_status = "لازم تعوض"
 
-      dep_summary_df = pd.DataFrame([{
-          "الشورت كود": dep_target_code,
-          "اسم الشركة": dep_name,
-          "تاركت الإيداعات": dep_target_total,
-          "المطلوب لحد اليوم": dep_expected_now,
-          "الإيداع الحالي": dep_amount,
-          "الحالة": dep_status,
-          "المبلغ المطلوب تعويضه": max(0.0, dep_expected_now - dep_amount),
-          "نسبة الإنجاز (%)": round(dep_amount / dep_target_total * 100.0, 1),
-      }])
+        dep_rows.append({
+            "الشورت كود": dep_target_code,
+            "اسم الشركة": dep_name,
+            "تاركت الإيداعات": dep_target_total,
+            "المطلوب لحد اليوم": dep_expected_now,
+            "الإيداع الحالي": dep_amount,
+            "الحالة": dep_status,
+            "المبلغ المطلوب تعويضه": max(0.0, dep_expected_now - dep_amount),
+            "نسبة الإنجاز (%)": round(
+                dep_amount / dep_target_total * 100.0, 1
+            ),
+        })
+
+      dep_summary_df = pd.DataFrame(dep_rows)
 
       # حذف الأعمدة J و K و L (الأعمدة رقم 10 و 11 و 12) من التقرير
       cols_to_drop_jkl = [
@@ -1522,7 +1535,9 @@ with tab_kpi:
             " الاختياري."
         )
 
-      st.subheader("💰 تاركت إيداعات علاء سيل (MA0012)")
+      st.subheader(
+          "💰 تاركت إيداعات الشركات (علاء سيل MA0012 - الغد الموعود MA0026)"
+      )
       st.dataframe(
           style_with_commas(dep_summary_df), use_container_width=True
       )
@@ -1581,7 +1596,10 @@ with tab_kpi:
             ws_emp.cell(row=dep_header_row, column=c_idx)._style = copy(
                 ws_emp.cell(row=1, column=c_idx)._style
             )
-        ws_emp.cell(row=dep_header_row + 1, column=8).number_format = "0.0"
+        for r_idx in range(
+            dep_header_row + 1, dep_header_row + 1 + len(dep_summary_df)
+        ):
+          ws_emp.cell(row=r_idx, column=8).number_format = "0.0"
       buffer_kpi = BytesIO()
       wb_k.save(buffer_kpi)
       buffer_kpi.seek(0)
