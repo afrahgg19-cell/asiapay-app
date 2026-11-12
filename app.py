@@ -1371,9 +1371,21 @@ with tab_kpi:
         emp_work["_emp"] = (
             emp_work[emp_col_name].fillna("").astype(str).str.strip()
         )
-        emp_work.loc[emp_work["_emp"] == "", "_emp"] = "بدون موظف"
+        # استبعاد المكاتب بدون موظف، وأي اسم فروزن (Frozen)
+        emp_work = emp_work[
+            (emp_work["_emp"] != "")
+            & ~emp_work["_emp"].str.lower().str.contains("frozen", regex=False)
+            & ~emp_work["_emp"].str.contains("فروزن", regex=False)
+        ]
         emp_work["_d100"] = (emp_work["حركه 100 الف"] == "Done").astype(int)
-        emp_work["_d3m"] = (emp_work["حركه 3 مليون"] == "Done").astype(int)
+        # حركه 3 مليون للموظف: تشمل المثالي و Done (حسب وضع المحفظة)
+        # وإذا ما انرفع ملف الرصيد التراكمي، يرجع على Done فقط
+        if "وضع المحفظة" in emp_work.columns:
+          emp_work["_d3m"] = (
+              emp_work["وضع المحفظة"].isin(["Done", "مثالي"]).astype(int)
+          )
+        else:
+          emp_work["_d3m"] = (emp_work["حركه 3 مليون"] == "Done").astype(int)
         emp_summary_df = (
             emp_work.groupby("_emp")
             .agg(
