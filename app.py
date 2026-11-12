@@ -1436,6 +1436,10 @@ with tab_kpi:
       ]
       dep_rows = []
       for dep_target_code, dep_default_name in dep_companies:
+        # تقرير كربلاء يطلع MA0012 فقط، وتقرير بابل يطلع MA0026 فقط:
+        # الشركة تظهر فقط إذا موجودة بحركات التقرير الإجباري المرفوع
+        if dep_target_code not in kpi_grouped:
+          continue
         dep_amount = 0.0
         dep_name = dep_default_name
         dep_match = final_kpi_table[
@@ -1470,7 +1474,19 @@ with tab_kpi:
             ),
         })
 
-      dep_summary_df = pd.DataFrame(dep_rows)
+      dep_summary_df = pd.DataFrame(
+          dep_rows,
+          columns=[
+              "الشورت كود",
+              "اسم الشركة",
+              "تاركت الإيداعات",
+              "المطلوب لحد اليوم",
+              "الإيداع الحالي",
+              "الحالة",
+              "المبلغ المطلوب تعويضه",
+              "نسبة الإنجاز (%)",
+          ],
+      )
 
       # حذف الأعمدة J و K و L (الأعمدة رقم 10 و 11 و 12) من التقرير
       cols_to_drop_jkl = [
@@ -1547,12 +1563,16 @@ with tab_kpi:
             " الاختياري."
         )
 
-      st.subheader(
-          "💰 تاركت إيداعات الشركات (علاء سيل MA0012 - الغد الموعود MA0026)"
-      )
-      st.dataframe(
-          style_with_commas(dep_summary_df), use_container_width=True
-      )
+      st.subheader("💰 تاركت الإيداعات")
+      if not dep_summary_df.empty:
+        st.dataframe(
+            style_with_commas(dep_summary_df), use_container_width=True
+        )
+      else:
+        st.info(
+            "لم يتم العثور على MA0012 (علاء سيل) أو MA0026 (الغد الموعود)"
+            " بالتقرير المرفوع."
+        )
 
       # --- تجهيز اسم ملف التحميل: اسم الملف الأصلي + تاريخ أمس (يوم-شهر) ---
       original_name_no_ext = os.path.splitext(kpi_uploaded_file.name)[0]
@@ -1579,12 +1599,13 @@ with tab_kpi:
         dep_start_row = (
             len(emp_summary_df) + 2 if emp_summary_df is not None else 0
         )
-        dep_summary_df.to_excel(
-            writer,
-            index=False,
-            sheet_name="Employees_Target",
-            startrow=dep_start_row,
-        )
+        if not dep_summary_df.empty:
+          dep_summary_df.to_excel(
+              writer,
+              index=False,
+              sheet_name="Employees_Target",
+              startrow=dep_start_row,
+          )
 
       # تطبيق تنسيق KPL على تقرير الـ KPI النهائي
       buffer_kpi.seek(0)
@@ -1603,7 +1624,7 @@ with tab_kpi:
 
         # جدول إيداعات علاء سيل: ترويسة بنفس تنسيق الترويسة ونسبته بخانة عشرية
         dep_header_row = emp_rows_count + 3 if emp_summary_df is not None else 1
-        if emp_summary_df is not None:
+        if emp_summary_df is not None and not dep_summary_df.empty:
           for c_idx in range(1, len(dep_summary_df.columns) + 1):
             ws_emp.cell(row=dep_header_row, column=c_idx)._style = copy(
                 ws_emp.cell(row=1, column=c_idx)._style
